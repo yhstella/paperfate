@@ -80,3 +80,15 @@
 **Next**: Session 5 — A1.2 (extract.ts wrapper for one paper), A1.4 (test-extract.mjs), and kick off B1 (PubMed remaining seeds in background, no API key = slower)
 **Files changed**: 14
 **Cost so far**: $0 (no Anthropic calls yet — only code)
+
+## Session 5 — A1.2 / A1.4 + start B1 (2026-05-20 ~04:18)
+
+**경과**: ~4.5h
+**Tasks completed**:
+- `src/server/extract.js` — `forecastManuscript()` with 14-domain rollup, key-weakness ranking, Q100/Q500 auto-pick
+- `scripts/test-extract.mjs` — dry-run mode verified (52 RCT-applicable Q100 items, prompts well-formed)
+- B1 started: PubMed collection in background (`bsdtcd98j`); 5 seeds completed in first ~2 min (oncology_solid, oncology_immuno, cardiology_hf, cardiology_cad in progress)
+- 1 commit pushed `e9333ac`
+**Next**: Session 6 — A1.5 (api/forecast.js endpoint), A2.1 (ruleExtractors.js core 10 functions), check B1 progress, write collect-openalex.mjs (B2)
+**Files changed**: 3 (extract.js, test-extract.mjs, this log)
+**Cost so far**: $0 (still no Anthropic calls — would need API key in env to test live)
