@@ -20,7 +20,9 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
 const SEEDS_PATH = join(HERE, 'seeds.json')
-const OUT_DIR = join(ROOT, 'data', 'pubmed')
+// DATA_ROOT env var allows pointing data dir to a large SSD without code changes
+const DATA_ROOT = process.env.DATA_ROOT || join(ROOT, 'data')
+const OUT_DIR = join(DATA_ROOT, 'pubmed')
 
 const API_KEY = process.env.NCBI_API_KEY || ''
 const REQ_PER_SEC = API_KEY ? 9 : 2.8       // stay under NCBI limits
@@ -50,21 +52,30 @@ class Limiter {
   }
 }
 
-async function fetchWithRetry(url, params, { attempts = 5 } = {}) {
+async function fetchWithRetry(url, params, { attempts = 5, timeoutMs = 30000 } = {}) {
   const u = new URL(url)
   Object.entries({ ...params, tool: TOOL, email: EMAIL, ...(API_KEY && { api_key: API_KEY }) })
     .forEach(([k, v]) => u.searchParams.set(k, v))
   let lastErr
   for (let i = 0; i < attempts; i++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const res = await fetch(u, { headers: { 'User-Agent': `${TOOL}/0.1 (${EMAIL})` } })
+      const res = await fetch(u, {
+        headers: { 'User-Agent': `${TOOL}/0.1 (${EMAIL})` },
+        signal: controller.signal,
+      })
       if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`)
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
-      return await res.text()
+      const body = await res.text()
+      clearTimeout(timer)
+      return body
     } catch (e) {
+      clearTimeout(timer)
       lastErr = e
+      const msg = e.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e.message
       const backoff = 800 * Math.pow(2, i)
-      console.warn(`  retry ${i + 1}/${attempts} after ${backoff}ms (${e.message})`)
+      console.warn(`  retry ${i + 1}/${attempts} after ${backoff}ms (${msg})`)
       await sleep(backoff)
     }
   }
@@ -226,9 +237,8 @@ async function collectSeed(key, query, opts) {
     if (ids.length === 0) break
     allIds.push(...ids)
     cursor += ids.length
-    process.stdout.write(`  esearch: ${allIds.length}/${Math.min(retmax, total)}\r`)
+    console.log(`  esearch: ${allIds.length}/${Math.min(retmax, total)}`)
   }
-  process.stdout.write('\n')
   console.log(`  total in PubMed: ${total} · taking: ${allIds.length}`)
 
   // 2) efetch metadata in batches
@@ -241,9 +251,8 @@ async function collectSeed(key, query, opts) {
       stream.write(JSON.stringify({ seed: key, ...rec }) + '\n')
       written++
     }
-    process.stdout.write(`  efetch: ${Math.min(i + BATCH_FETCH, allIds.length)}/${allIds.length} · written ${written}\r`)
+    console.log(`  efetch: ${Math.min(i + BATCH_FETCH, allIds.length)}/${allIds.length} · written ${written}`)
   }
-  process.stdout.write('\n')
 
   await new Promise(r => stream.end(r))
   const size = statSync(outPath).size
