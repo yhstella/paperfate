@@ -1,0 +1,172 @@
+{
+  "version": "0.2.0",
+  "name": "PaperFate Q500 rubric schema",
+  "scoring_scale": {
+    "0": "Absent or clearly poor",
+    "1": "Very weak",
+    "2": "Weak",
+    "3": "Acceptable / standard",
+    "4": "Strong",
+    "5": "Excellent / exemplary"
+  },
+  "special_codes": {
+    "NA":  "Not applicable for this article type",
+    "UNK": "Cannot determine from available text"
+  },
+  "universal_UNK_condition": "Required evidence is not present anywhere in the supplied input sections.",
+  "rubric_formats": {
+    "full":    "6-string array, anchors for scores 0..5. Item-specific phrases at every level. Used for Q100 items (~100).",
+    "compact": "4-string array, item-specific anchors mapped internally to scores 0/2/4/5. Levels 1 and 3 are interpolations between adjacent anchors and chosen by the LLM only when evidence is between two anchored states. Used for non-Q100 items (~400)."
+  },
+  "default_rubric": {
+    "full": [
+      "Not addressed; absent despite being clearly relevant.",
+      "Briefly mentioned without substance.",
+      "Mentioned with minimal or unclear methodology.",
+      "Adequately addressed using standard methodology.",
+      "Well-addressed with explicit method and justification.",
+      "Exemplary — transparent, with sensitivity analyses or methodological innovation."
+    ],
+    "compact": [
+      "Not addressed.",
+      "Mentioned without method.",
+      "Addressed with method.",
+      "Method + transparency or sensitivity analysis."
+    ]
+  },
+  "input_levels": {
+    "1": "Title / abstract — assessable from ≤300-word abstract",
+    "2": "Main manuscript text needed (intro/methods/results body)",
+    "3": "Detailed methods, results section, or limitations needed",
+    "4": "Tables / figures / supplement / external resources needed"
+  },
+  "input_sections": [
+    "title",
+    "abstract",
+    "introduction",
+    "methods",
+    "results",
+    "discussion",
+    "conclusion",
+    "tables",
+    "figures",
+    "supplement",
+    "external_db"
+  ],
+  "scoring_modes": {
+    "rule":     "Deterministic regex/parser extraction. Cheap, reproducible. Used for n=, p-values, AUROC, CI presence, registry IDs, etc.",
+    "llm":      "LLM evidence-first scoring with rubric anchors. Required for subjective items (novelty, balance, honesty).",
+    "hybrid":   "Rule extracts candidate evidence string(s); LLM applies rubric to it. Cheaper and more consistent than pure LLM.",
+    "external": "Requires an external database (PubMed/OpenAlex/journal directory) lookup beyond the manuscript text. E.g., 'guideline gap relevance' compared against current society guidelines."
+  },
+  "article_types": [
+    "clinical_cohort",
+    "RCT",
+    "case_control",
+    "cross_sectional",
+    "case_series",
+    "meta_analysis",
+    "systematic_review",
+    "prediction_model",
+    "diagnostic_accuracy",
+    "ai_imaging",
+    "basic_translational",
+    "qualitative",
+    "modeling_simulation",
+    "scoping_review",
+    "narrative_review",
+    "economic_evaluation"
+  ],
+  "reporting_guidelines": {
+    "CONSORT":    "Randomized controlled trials (CONSORT 2010 + extensions)",
+    "CONSORT-AI": "RCTs of AI/ML interventions",
+    "SPIRIT":     "Trial protocols",
+    "STROBE":     "Observational studies (cohort, case-control, cross-sectional)",
+    "STARD":      "Diagnostic accuracy studies",
+    "TRIPOD":     "Prediction model development & validation",
+    "TRIPOD-AI":  "Prediction models using AI/ML",
+    "PROBAST":    "Risk-of-bias assessment for prediction models",
+    "PRISMA":     "Systematic reviews and meta-analyses",
+    "ROBINS-I":   "Risk of bias in non-randomized studies of interventions",
+    "AMSTAR-2":   "Quality assessment of systematic reviews",
+    "ARRIVE":     "Animal in vivo research",
+    "CHEERS":     "Health economic evaluations",
+    "CLAIM":      "Clinical AI / medical imaging",
+    "MI-CLAIM":   "Minimum information for clinical AI modeling",
+    "SAGER":      "Sex and gender reporting",
+    "RECORD":     "Routinely collected health data"
+  },
+  "relation_kinds": {
+    "canonical":  "This item is the canonical scoring of the concept; other items referring to the same concept should defer to this one in aggregation.",
+    "subtype":    "This item is a domain-specific specialization of a canonical item. Both can be scored but downstream aggregation should down-weight the subtype to avoid double-counting.",
+    "narrower":   "This item is a narrower aspect of a parent canonical item.",
+    "broader":    "This item is a broader version that subsumes another item."
+  },
+  "weights": {
+    "default":      1.0,
+    "domain_default": {
+      "QUEST": 0.8, "NOVEL": 1.2, "RELEV": 1.2, "DESIGN": 1.2,
+      "POPUL": 1.0, "EXPOS": 1.0, "OUTCM": 1.0, "STATS": 1.2,
+      "BIAS":  1.1, "EXTV": 1.2, "AIPRED": 1.1, "REPRT": 0.7,
+      "INTERP": 0.8, "FIGS": 0.5
+    },
+    "rationale": "Domain weights reflect predicted impact on citation/journal-tier in held-out 2023 corpus; will be re-estimated empirically once FateCore-v0.2 is trained. STATS/DESIGN/RELEV/EXTV/NOVEL weighted highest; REPRT/FIGS weighted lowest because their signal in citations is well-known to be weaker."
+  },
+  "article_type_normalization": {
+    "rule": "Final FateCore score is computed AFTER article-type-specific normalization. Within each article_type, the scored set of applicable items has its own mean and SD baseline. A retrospective cohort is therefore not compared to RCTs on the absolute Q500 sum, only against other retrospective cohorts in the same domain.",
+    "baselines_path": "models/article_type_baselines.json"
+  },
+  "item_record_schema": {
+    "required": ["id", "name", "q", "rubric", "types", "lvl", "mode", "evidence"],
+    "optional": ["NA", "Q100", "guideline", "weight", "relation", "notes"],
+    "field_semantics": {
+      "id":        "Unique identifier in {DOMAIN}_{NNN} form (e.g., STATS_023)",
+      "name":      "Short human-readable label (≤6 words)",
+      "q":         "The actual scoring question",
+      "rubric":    "Array of 4 strings (compact) or 6 strings (full) — item-specific anchors",
+      "types":     "Array of article_types where this applies, or '*' for all",
+      "NA":        "Short condition string that makes this item NA",
+      "lvl":       "Input level 1..4",
+      "mode":      "rule | llm | hybrid | external",
+      "evidence":  "Array of short keywords or phrases describing what must be found in the manuscript to score >0",
+      "guideline": "Array of reporting_guideline keys whose item this maps to",
+      "weight":    "Optional float — overrides default (1.0) for downstream aggregation",
+      "Q100":      "Boolean. true ⇒ item is in the abstract-only Q100 subset and has a full 6-anchor rubric",
+      "relation":  "Object {of: id, kind: relation_kind} — relates this item to a canonical one"
+    }
+  },
+  "extraction_output_schema": {
+    "description": "Per-item result stored after the server scores a manuscript with Q500.",
+    "fields": {
+      "id":               "Item id",
+      "score":            "Integer 0..5, or 'NA', or 'UNK'",
+      "applicability":    "applicable | not_applicable | indeterminate",
+      "confidence":       "Float 0..1",
+      "evidence_text":    "Quoted text from the manuscript",
+      "evidence_section": "Best-matching input_section",
+      "rationale_short":  "1-sentence justification of the score against the rubric",
+      "scoring_mode":     "rule | llm | hybrid | external",
+      "review_status":    "auto | flagged_low_confidence | human_reviewed",
+      "rubric_version":   "Rubric schema version used (matches this file's version)",
+      "scored_at":        "ISO8601 timestamp"
+    }
+  },
+  "extraction_prompt_outline": {
+    "purpose": "Reference outline for the system prompt used in llm/hybrid mode. Live prompt lives in src/lib/extractionPrompt.ts on the server.",
+    "steps": [
+      "1. Read the input sections provided.",
+      "2. Search for evidence matching the item's `evidence` keywords.",
+      "3. If no evidence is found anywhere in supplied input → emit UNK with confidence < 0.4.",
+      "4. If the article type is not in `types` (and no '*') → emit NA.",
+      "5. Otherwise quote the most relevant evidence span (≤30 words).",
+      "6. Identify the rubric anchor that best matches the evidence.",
+      "7. Emit score = anchor index, confidence based on quality of evidence match.",
+      "8. Write a 1-sentence rationale_short referencing the rubric anchor."
+    ]
+  },
+  "calibration_targets": {
+    "inter_rater_kappa_min":     0.60,
+    "abstain_rate_max_for_q100": 0.20,
+    "human_calibration_set_size": 200
+  }
+}
