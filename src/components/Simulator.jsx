@@ -1,35 +1,71 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { simulate } from '../lib/mockEngine.js'
+import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 
+const FIELDS = [
+  'Auto-detect',
+  'Oncology', 'Cardiology', 'Neurology', 'Endocrinology',
+  'Infectious disease', 'Pulmonology', 'Gastroenterology', 'Nephrology',
+  'Rheumatology', 'Psychiatry', 'Surgery', 'Radiology', 'Pediatrics',
+  'Public health', 'Hepatology', 'Basic / translational', 'Other',
+]
+
+const STUDY_TYPES = [
+  'Auto-detect',
+  'Randomized controlled trial',
+  'Meta-analysis / systematic review',
+  'Multicenter retrospective cohort',
+  'Prospective cohort',
+  'Retrospective cohort',
+  'Case-control',
+  'Cross-sectional',
+  'Modeling / AI',
+  'Basic / translational',
+  'Other',
+]
+
+const TARGETS = ['Auto-recommend', 'IF <5', 'IF 5–10', 'IF 10–15', 'IF 15–25', 'IF >25 (top-tier)']
+
+// A general, balanced sample (cardiovascular RCT) so the demo doesn't lean to any one specialty.
 const SAMPLE = {
-  title: 'A multicenter deep-learning model for HCC risk prediction in chronic hepatitis B',
-  abstract: 'Background: Hepatocellular carcinoma (HCC) remains a leading cause of cancer mortality. Existing risk scores have limited discrimination. We developed and externally validated a deep-learning model that integrates routine laboratory data and FibroScan-derived liver stiffness to stratify HCC risk in chronic hepatitis B patients. Methods: We retrospectively enrolled 12,438 CHB patients from 7 tertiary centers in South Korea, Taiwan, and Japan (2009-2022). The model was trained on 8,210 patients and externally validated on two independent cohorts (n=2,114 and n=2,114). Primary endpoint was HCC development within 5 years. Results: Median follow-up was 6.4 years; 612 HCC events occurred. The model achieved a time-dependent AUC of 0.872 (95% CI 0.851-0.893) in external validation, outperforming PAGE-B (0.764) and mPAGE-B (0.791). Decision curve analysis showed net benefit across clinically relevant thresholds. Conclusions: Our externally validated model improves HCC risk stratification in CHB and may support personalized surveillance.',
-  field: 'Hepatology',
-  studyType: 'Multicenter retrospective cohort',
-  sampleSize: 12438,
-  validation: 'External (2 cohorts)',
-  target: 'IF 10–15',
+  title: 'Empagliflozin and major adverse cardiovascular events in adults with chronic kidney disease',
+  text: `Background: SGLT2 inhibitors reduce cardiovascular events in patients with type 2 diabetes, but their effect in adults with chronic kidney disease (CKD) without diabetes is uncertain.
+Methods: In this international, multicenter, double-blind, placebo-controlled trial, we randomly assigned 6,609 adults with CKD (eGFR 20–45 ml/min/1.73 m^2 or eGFR 45–90 with albuminuria) to empagliflozin 10 mg daily or matching placebo. The primary composite outcome was progression of kidney disease or death from cardiovascular causes. Secondary outcomes included hospitalization for heart failure and all-cause mortality.
+Results: Median follow-up was 2.0 years. The primary outcome occurred in 432 of 3,304 participants (13.1%) in the empagliflozin group and in 558 of 3,305 (16.9%) in the placebo group (hazard ratio 0.72, 95% CI 0.64–0.82, P<0.001). Effects were consistent across pre-specified subgroups including patients without diabetes and those with the lowest baseline eGFR.
+Conclusions: Empagliflozin reduced the risk of kidney-disease progression or cardiovascular death in adults with CKD, with and without diabetes.`,
+  inputMode: 'abstract',
 }
 
+const PLACEHOLDER = `Paste your abstract here. PaperFate will read it and auto-detect study type, sample size, validation, and field — you can correct anything below before simulating.
+
+Tip: structured abstracts (Background / Methods / Results / Conclusions) give the sharpest forecast.`
+
 export default function Simulator() {
-  const [form, setForm] = useState({
-    title: '', abstract: '', field: 'Hepatology',
-    studyType: 'Retrospective cohort', sampleSize: '',
-    validation: 'Internal only', target: 'IF 5–10',
-  })
-  const [status, setStatus] = useState('idle') // idle | running | done
+  const [inputMode, setInputMode] = useState('abstract') // 'abstract' | 'full'
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [overrides, setOverrides] = useState({}) // user corrections, by key
+  const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
-  const charCount = form.abstract.length
-  const canRun = form.title.trim().length > 10 && charCount > 200
+  const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
+  const charCount = text.length
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
+  const minChars = inputMode === 'full' ? 1000 : 200
+  const canRun = title.trim().length > 8 && charCount >= minChars
 
-  function onChange(e) {
-    setForm({ ...form, [e.target.name]: e.target.value })
+  function get(key, fallback) {
+    if (overrides[key] && overrides[key] !== 'Auto-detect' && overrides[key] !== 'Auto-recommend') return overrides[key]
+    if (meta[key]?.value) return meta[key].value
+    return fallback
   }
 
   function loadSample() {
-    setForm(SAMPLE)
+    setTitle(SAMPLE.title)
+    setText(SAMPLE.text)
+    setInputMode(SAMPLE.inputMode)
+    setOverrides({})
     setStatus('idle')
     setResult(null)
   }
@@ -39,14 +75,24 @@ export default function Simulator() {
     if (!canRun) return
     setStatus('running')
     setResult(null)
-    // simulate latency so the UX feels real
-    await new Promise(r => setTimeout(r, 1400))
-    const r = simulate(form)
-    setResult(r)
+    await new Promise(r => setTimeout(r, 1300))
+    const input = {
+      title,
+      abstract: text,                            // mockEngine reads this field
+      field:      get('field', 'Other'),
+      studyType:  get('studyType', 'Other'),
+      sampleSize: get('sampleSize', 0),
+      validation: get('validation', 'Not applicable'),
+      target:     overrides.target && overrides.target !== 'Auto-recommend' ? overrides.target : 'IF 5–10',
+      multicenter: meta.multicenter?.value || false,
+      endpoints:   meta.endpoints?.value || [],
+      inputMode,
+    }
+    setResult(simulate(input))
     setStatus('done')
     setTimeout(() => {
       document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 50)
+    }, 60)
   }
 
   return (
@@ -55,13 +101,14 @@ export default function Simulator() {
         <div className="lg:col-span-2">
           <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">The simulator</h2>
           <p className="mt-3 text-slate-400">
-            Paste your title and abstract. PaperFate retrieves comparable published papers,
-            normalizes citation patterns by field and year, and returns a probabilistic forecast.
+            Paste your title and abstract — or the full manuscript. PaperFate reads the text,
+            auto-detects what it can (study type, sample size, validation, field, endpoints),
+            and returns a probabilistic forecast.
           </p>
           <ul className="mt-6 space-y-2 text-sm text-slate-400">
+            <Bullet>One text box. Structured fields are inferred, not asked.</Bullet>
             <Bullet>Embeddings + OpenAlex similarity (top-200)</Bullet>
             <Bullet>Field- and year-normalized citation percentiles</Bullet>
-            <Bullet>Journal tier modeled from venue history of similar work</Bullet>
             <Bullet>LLM-graded novelty, methods, clinical relevance</Bullet>
           </ul>
           <button onClick={loadSample} type="button" className="mt-6 text-xs text-fate-300 underline-offset-4 hover:underline">
@@ -71,48 +118,46 @@ export default function Simulator() {
 
         <form onSubmit={onSubmit} className="card p-5 sm:p-6 lg:col-span-3">
           <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <Tabs
+                value={inputMode}
+                onChange={setInputMode}
+                options={[
+                  { value: 'abstract', label: 'Abstract' },
+                  { value: 'full', label: 'Full manuscript' },
+                ]}
+              />
+              <div className="text-[11px] text-slate-500">
+                {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars
+                {charCount > 0 && charCount < minChars && (
+                  <span className="ml-2 text-amber-300/80">need {(minChars - charCount).toLocaleString()} more</span>
+                )}
+              </div>
+            </div>
+
             <Field label="Title">
               <input
-                name="title" value={form.title} onChange={onChange}
-                placeholder="e.g., A multicenter deep-learning model for HCC risk prediction…"
+                value={title} onChange={e => setTitle(e.target.value)}
+                placeholder="Your manuscript title"
                 className="input"
               />
             </Field>
 
-            <Field label="Abstract" hint={`${charCount} chars · min 200`}>
+            <Field label={inputMode === 'full' ? 'Full manuscript' : 'Abstract'}>
               <textarea
-                name="abstract" value={form.abstract} onChange={onChange}
-                rows={8}
-                placeholder="Paste your full abstract. The richer the structured detail (methods, sample size, endpoint, validation), the sharper the forecast."
+                value={text} onChange={e => setText(e.target.value)}
+                rows={inputMode === 'full' ? 14 : 9}
+                placeholder={PLACEHOLDER}
                 className="input resize-y leading-relaxed"
               />
             </Field>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Field">
-                <select name="field" value={form.field} onChange={onChange} className="input">
-                  {['Hepatology','Gastroenterology','Oncology','Cardiology','Endocrinology','Radiology','Pulmonology','Neurology','Surgery','Infectious disease','Other'].map(v => <option key={v}>{v}</option>)}
-                </select>
-              </Field>
-              <Field label="Study type">
-                <select name="studyType" value={form.studyType} onChange={onChange} className="input">
-                  {['Multicenter retrospective cohort','Retrospective cohort','Prospective cohort','RCT','Meta-analysis / systematic review','Case-control','Cross-sectional','Basic / translational','Modeling / AI'].map(v => <option key={v}>{v}</option>)}
-                </select>
-              </Field>
-              <Field label="Sample size">
-                <input name="sampleSize" value={form.sampleSize} onChange={onChange} type="number" min="0" placeholder="e.g., 1240" className="input" />
-              </Field>
-              <Field label="Validation">
-                <select name="validation" value={form.validation} onChange={onChange} className="input">
-                  {['Internal only','External (1 cohort)','External (2 cohorts)','External (≥3 cohorts)','None'].map(v => <option key={v}>{v}</option>)}
-                </select>
-              </Field>
-              <Field label="Target tier">
-                <select name="target" value={form.target} onChange={onChange} className="input">
-                  {['IF <5','IF 5–10','IF 10–15','IF 15–25','IF >25 (top-tier)'].map(v => <option key={v}>{v}</option>)}
-                </select>
-              </Field>
-            </div>
+            <DetectedPanel
+              meta={meta}
+              overrides={overrides}
+              setOverride={(k, v) => setOverrides(o => ({ ...o, [k]: v }))}
+              targetValue={overrides.target || 'Auto-recommend'}
+            />
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-xs text-slate-500">
@@ -128,9 +173,107 @@ export default function Simulator() {
 
       <div id="result" className="mt-10 scroll-mt-24">
         {status === 'running' && <SkeletonResult />}
-        {status === 'done' && result && <ResultPanel result={result} input={form} />}
+        {status === 'done' && result && <ResultPanel result={result} input={{ title, abstract: text }} />}
       </div>
     </section>
+  )
+}
+
+function DetectedPanel({ meta, overrides, setOverride, targetValue }) {
+  const items = [
+    { key: 'field',      label: 'Field',       options: FIELDS,       detected: meta.field?.value,      confidence: meta.field?.confidence },
+    { key: 'studyType',  label: 'Study type',  options: STUDY_TYPES,  detected: meta.studyType?.value,  confidence: meta.studyType?.confidence },
+    { key: 'sampleSize', label: 'Sample size', input: true,           detected: meta.sampleSize?.value, confidence: meta.sampleSize?.confidence },
+    { key: 'validation', label: 'Validation',  options: ['Auto-detect','Not applicable','Internal only','External (1 cohort)','External (2 cohorts)','External (≥3 cohorts)'], detected: meta.validation?.value, confidence: meta.validation?.confidence },
+  ]
+  return (
+    <div className="rounded-xl border border-white/5 bg-ink-900/50 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+          Auto-detected · correct anything that's off
+        </div>
+        <ConfidenceLegend />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {items.map(it => (
+          <DetectedRow key={it.key} item={it} value={overrides[it.key]} onChange={v => setOverride(it.key, v)} />
+        ))}
+        <DetectedRow
+          item={{ key: 'target', label: 'Target tier', options: TARGETS, detected: null, confidence: null, hint: 'Leave on auto to let PaperFate pick the best fit.' }}
+          value={targetValue}
+          onChange={v => setOverride('target', v)}
+        />
+      </div>
+      {meta.multicenter?.value && (
+        <div className="mt-3 text-[11px] text-slate-500">
+          Also detected: multicenter{meta.multicenter.count ? ` (${meta.multicenter.count} centers)` : ''}.
+          {meta.endpoints?.value?.length ? ` Endpoints: ${meta.endpoints.value.join(', ')}.` : ''}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DetectedRow({ item, value, onChange }) {
+  const detected = item.detected
+  const conf = item.confidence
+  const chipTone =
+    !detected ? 'border-white/10 text-slate-500' :
+    conf >= 0.8 ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' :
+    conf >= 0.6 ? 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' :
+                  'border-slate-500/30 text-slate-400'
+  return (
+    <label className="block">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{item.label}</span>
+        <span className={`chip border ${chipTone}`}>
+          {!detected ? 'not detected' : conf >= 0.8 ? 'high conf.' : conf >= 0.6 ? 'medium' : 'low'}
+        </span>
+      </div>
+      {item.input ? (
+        <input
+          type="number" min="0"
+          value={value ?? detected ?? ''}
+          onChange={e => onChange(e.target.value ? Number(e.target.value) : '')}
+          placeholder="(auto)"
+          className="input"
+        />
+      ) : (
+        <select
+          value={value ?? (detected || item.options[0])}
+          onChange={e => onChange(e.target.value)}
+          className="input"
+        >
+          {item.options.map(o => <option key={o} value={o}>{o}{o === detected ? '  ← detected' : ''}</option>)}
+        </select>
+      )}
+    </label>
+  )
+}
+
+function ConfidenceLegend() {
+  return (
+    <div className="hidden gap-1.5 sm:flex">
+      <span className="chip border-emerald-400/30 text-emerald-300/90">high</span>
+      <span className="chip border-amber-400/30 text-amber-200/90">medium</span>
+      <span className="chip border-white/10 text-slate-500">none</span>
+    </div>
+  )
+}
+
+function Tabs({ value, onChange, options }) {
+  return (
+    <div className="inline-flex rounded-lg border border-white/10 bg-ink-900 p-1 text-xs">
+      {options.map(o => (
+        <button
+          key={o.value} type="button"
+          onClick={() => onChange(o.value)}
+          className={`rounded-md px-3 py-1.5 transition ${value === o.value ? 'bg-fate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
