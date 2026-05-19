@@ -66,5 +66,17 @@
 ## Session 4 — First work session (2026-05-20 ~03:42)
 
 **경과**: ~4h / 4h 목표 ✅ rest 종료, 작업 시작
-**Planned tasks**: A1.1 (extractionPrompt + anthropicClient), B-setup (DATA_ROOT 패턴)
-**Status**: in progress
+**Tasks attempted**: A1.1, B-setup, backlog commits
+**Tasks completed**:
+- `src/server/extractionPrompt.js` (evidence-first prompt builder, 6-anchor + 4-anchor rubric formatting)
+- `src/server/anthropicClient.js` (`PaperFateExtractor` class: scoreItem, batchScore, retry, model fallback, cost tracking, filterItems)
+- `@anthropic-ai/sdk` 0.97.1 installed
+- `scripts/collect-pubmed.mjs` updated for `DATA_ROOT` env var (SSD migration ready)
+- 4 commits pushed to origin/main:
+  - `2e85...` docs: Q500 v0.2 rubric bank + FateCore architecture
+  - `3544...` feat(simulator): single-input form with auto-extracted metadata
+  - `1b6e...` feat(scripts): rebalance seeds.json to 30 seeds
+  - `0c02...` feat(autonomous): A1.1 extraction foundation + B-setup DATA_ROOT
+**Next**: Session 5 — A1.2 (extract.ts wrapper for one paper), A1.4 (test-extract.mjs), and kick off B1 (PubMed remaining seeds in background, no API key = slower)
+**Files changed**: 14
+**Cost so far**: $0 (no Anthropic calls yet — only code)
