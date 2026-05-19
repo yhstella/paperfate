@@ -1,0 +1,17 @@
+{
+  "_comment": "PubMed seed queries for PaperFate corpus. Each entry is queried separately and its results saved to data/pubmed/<key>-<YYYY-MM-DD>.jsonl. Tune freely.",
+  "_dateRange": "2018:2025",
+  "_retmaxPerSeed": 2000,
+  "seeds": {
+    "hepatology_hcc":      "(hepatocellular carcinoma[Title/Abstract] OR HCC[Title/Abstract]) AND (risk[Title/Abstract] OR surveillance[Title/Abstract] OR prediction[Title/Abstract])",
+    "hepatology_general":  "(chronic hepatitis B[Title/Abstract] OR NAFLD[Title/Abstract] OR MASLD[Title/Abstract] OR cirrhosis[Title/Abstract]) AND humans[MeSH]",
+    "glp1_obesity":        "(GLP-1[Title/Abstract] OR semaglutide[Title/Abstract] OR tirzepatide[Title/Abstract] OR liraglutide[Title/Abstract]) AND (obesity[Title/Abstract] OR diabetes[Title/Abstract] OR cardiovascular[Title/Abstract])",
+    "ai_clinical_models":  "(deep learning[Title/Abstract] OR machine learning[Title/Abstract] OR transformer[Title/Abstract] OR foundation model[Title/Abstract]) AND (clinical[Title/Abstract] OR diagnosis[Title/Abstract] OR prognosis[Title/Abstract] OR risk prediction[Title/Abstract])",
+    "external_validation": "(external validation[Title/Abstract] OR multicenter[Title/Abstract] OR multi-center[Title/Abstract]) AND (prediction model[Title/Abstract] OR risk score[Title/Abstract] OR clinical model[Title/Abstract])",
+    "decision_curve":      "(decision curve analysis[Title/Abstract] OR net benefit[Title/Abstract] OR clinical utility[Title/Abstract])",
+    "rct_landmark":        "(randomized controlled trial[Publication Type] OR RCT[Title/Abstract]) AND (Lancet[Journal] OR \"N Engl J Med\"[Journal] OR JAMA[Journal] OR BMJ[Journal])",
+    "meta_analysis":       "(meta-analysis[Publication Type] OR systematic review[Publication Type]) AND humans[MeSH]",
+    "biomarker":           "(biomarker[Title/Abstract] OR prognostic[Title/Abstract]) AND (validation[Title/Abstract] OR cohort[Title/Abstract])",
+    "imaging_ai":          "(MRI[Title/Abstract] OR CT[Title/Abstract] OR ultrasound[Title/Abstract] OR radiomics[Title/Abstract]) AND (deep learning[Title/Abstract] OR AI[Title/Abstract] OR neural network[Title/Abstract])"
+  }
+}

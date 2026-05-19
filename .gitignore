@@ -1,0 +1,12 @@
+node_modules
+dist
+.vite
+.env
+.env.local
+.DS_Store
+*.log
+
+# Collected research data (kept local, often large)
+data/pubmed/
+data/openalex/
+data/cache/

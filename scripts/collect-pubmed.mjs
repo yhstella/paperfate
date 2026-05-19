@@ -1,0 +1,296 @@
+#!/usr/bin/env node
+// PaperFate · PubMed corpus collector
+// Pulls PMIDs per seed query via esearch, then fetches metadata via efetch,
+// streams JSONL to data/pubmed/<seed>-<YYYY-MM-DD>.jsonl.
+//
+// Usage:
+//   node scripts/collect-pubmed.mjs                # all seeds
+//   node scripts/collect-pubmed.mjs hepatology_hcc # one seed
+//   NCBI_API_KEY=... node scripts/collect-pubmed.mjs   # 10 req/s instead of 3
+//
+// Notes:
+// - No external deps. Uses Node 18+ built-in fetch.
+// - Minimal XML parsing via regex — fine for PubMed's narrow schema.
+// - Resumes nothing on rerun; deletes target file first. Tune RETMAX in seeds.json.
+
+import { readFileSync, mkdirSync, createWriteStream, existsSync, statSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const ROOT = join(HERE, '..')
+const SEEDS_PATH = join(HERE, 'seeds.json')
+const OUT_DIR = join(ROOT, 'data', 'pubmed')
+
+const API_KEY = process.env.NCBI_API_KEY || ''
+const REQ_PER_SEC = API_KEY ? 9 : 2.8       // stay under NCBI limits
+const BATCH_FETCH = 200                      // PMIDs per efetch call
+const ESEARCH = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi'
+const EFETCH  = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi'
+const TOOL = 'paperfate'
+const EMAIL = process.env.NCBI_EMAIL || 'beta@paperfate.com'
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function pad(n) { return n.toString().padStart(2, '0') }
+function todayStamp() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+class Limiter {
+  constructor(perSec) { this.gap = 1000 / perSec; this.last = 0 }
+  async take() {
+    const now = Date.now()
+    const wait = Math.max(0, this.last + this.gap - now)
+    if (wait) await sleep(wait)
+    this.last = Date.now()
+  }
+}
+
+async function fetchWithRetry(url, params, { attempts = 5 } = {}) {
+  const u = new URL(url)
+  Object.entries({ ...params, tool: TOOL, email: EMAIL, ...(API_KEY && { api_key: API_KEY }) })
+    .forEach(([k, v]) => u.searchParams.set(k, v))
+  let lastErr
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(u, { headers: { 'User-Agent': `${TOOL}/0.1 (${EMAIL})` } })
+      if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
+      return await res.text()
+    } catch (e) {
+      lastErr = e
+      const backoff = 800 * Math.pow(2, i)
+      console.warn(`  retry ${i + 1}/${attempts} after ${backoff}ms (${e.message})`)
+      await sleep(backoff)
+    }
+  }
+  throw lastErr
+}
+
+// ─────────────────── XML parsing helpers (regex, minimal) ───────────────────
+
+function decodeEntities(s) {
+  if (!s) return s
+  return s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+}
+
+function stripTags(s) {
+  return decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
+}
+
+function firstMatch(xml, tag) {
+  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`))
+  return m ? stripTags(m[1]) : ''
+}
+
+function allMatches(xml, tag) {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'g')
+  const out = []
+  let m
+  while ((m = re.exec(xml)) !== null) out.push(stripTags(m[1]))
+  return out
+}
+
+function parsePubMedArticle(xml) {
+  const pmid = firstMatch(xml, 'PMID')
+  const title = firstMatch(xml, 'ArticleTitle')
+
+  // Abstract may be structured with multiple <AbstractText Label="...">
+  const absRe = /<AbstractText[^>]*?(?:Label="([^"]*)")?[^>]*>([\s\S]*?)<\/AbstractText>/g
+  const absParts = []
+  let am
+  while ((am = absRe.exec(xml)) !== null) {
+    const label = am[1] ? `${am[1]}: ` : ''
+    absParts.push(label + stripTags(am[2]))
+  }
+  const abstract = absParts.join(' ')
+
+  // Journal — prefer ISOAbbreviation, fallback to Title
+  const journalBlock = xml.match(/<Journal>[\s\S]*?<\/Journal>/)?.[0] || ''
+  const journal = firstMatch(journalBlock, 'ISOAbbreviation') || firstMatch(journalBlock, 'Title')
+  const issn = firstMatch(journalBlock, 'ISSN')
+
+  // Year — prefer ArticleDate, then PubDate
+  const articleDate = xml.match(/<ArticleDate[^>]*>[\s\S]*?<\/ArticleDate>/)?.[0] || ''
+  const pubDate = xml.match(/<PubDate>[\s\S]*?<\/PubDate>/)?.[0] || ''
+  let year = firstMatch(articleDate, 'Year') || firstMatch(pubDate, 'Year')
+  if (!year) {
+    const medlineDate = firstMatch(pubDate, 'MedlineDate')
+    const ym = medlineDate.match(/\b(19|20)\d{2}\b/)
+    if (ym) year = ym[0]
+  }
+  year = year ? Number(year) : null
+
+  // DOI
+  const doi = (xml.match(/<ELocationID[^>]*EIdType="doi"[^>]*>([^<]+)<\/ELocationID>/i)
+            || xml.match(/<ArticleId[^>]*IdType="doi"[^>]*>([^<]+)<\/ArticleId>/i))?.[1] || ''
+
+  // Publication types
+  const pubTypes = []
+  const ptRe = /<PublicationType[^>]*>([^<]+)<\/PublicationType>/g
+  let pm
+  while ((pm = ptRe.exec(xml)) !== null) pubTypes.push(decodeEntities(pm[1]))
+
+  // MeSH terms (descriptor names only)
+  const meshTerms = []
+  const meshRe = /<MeshHeading>[\s\S]*?<DescriptorName[^>]*>([^<]+)<\/DescriptorName>[\s\S]*?<\/MeshHeading>/g
+  let mm
+  while ((mm = meshRe.exec(xml)) !== null) meshTerms.push(decodeEntities(mm[1]))
+
+  // Authors — last names, capped 6
+  const authors = []
+  const authorRe = /<Author[^>]*>[\s\S]*?<LastName>([^<]+)<\/LastName>(?:[\s\S]*?<ForeName>([^<]+)<\/ForeName>)?[\s\S]*?<\/Author>/g
+  let am2
+  while ((am2 = authorRe.exec(xml)) !== null) {
+    const last = decodeEntities(am2[1])
+    const fore = am2[2] ? decodeEntities(am2[2]) : ''
+    authors.push(fore ? `${last} ${fore[0]}` : last)
+    if (authors.length >= 8) break
+  }
+
+  // Affiliations — first author affiliation as country/institution hint
+  const affil = (xml.match(/<Affiliation>([^<]+)<\/Affiliation>/)?.[1]) || ''
+
+  return {
+    pmid,
+    doi: doi || null,
+    title,
+    abstract,
+    journal,
+    issn: issn || null,
+    year,
+    publicationTypes: pubTypes,
+    meshTerms: meshTerms.slice(0, 20),
+    authors,
+    firstAffiliation: stripTags(affil) || null,
+  }
+}
+
+// ─────────────────────────────── pipeline ────────────────────────────────────
+
+async function esearchPMIDs(query, retmax, retstart, limiter) {
+  await limiter.take()
+  const xml = await fetchWithRetry(ESEARCH, {
+    db: 'pubmed', term: query, retmode: 'xml',
+    retmax: String(retmax), retstart: String(retstart),
+  })
+  const ids = []
+  const re = /<Id>(\d+)<\/Id>/g
+  let m
+  while ((m = re.exec(xml)) !== null) ids.push(m[1])
+  const total = Number(xml.match(/<Count>(\d+)<\/Count>/)?.[1] || 0)
+  return { ids, total }
+}
+
+async function efetchBatch(pmids, limiter) {
+  await limiter.take()
+  const xml = await fetchWithRetry(EFETCH, {
+    db: 'pubmed', id: pmids.join(','), retmode: 'xml',
+  })
+  const articleXmls = []
+  const re = /<PubmedArticle>([\s\S]*?)<\/PubmedArticle>/g
+  let m
+  while ((m = re.exec(xml)) !== null) articleXmls.push(m[1])
+  return articleXmls.map(parsePubMedArticle)
+}
+
+async function collectSeed(key, query, opts) {
+  const { retmax = 2000 } = opts
+  const limiter = new Limiter(REQ_PER_SEC)
+
+  mkdirSync(OUT_DIR, { recursive: true })
+  const outPath = join(OUT_DIR, `${key}-${todayStamp()}.jsonl`)
+  if (existsSync(outPath)) {
+    console.log(`▷ ${key}: rerun → overwriting ${outPath}`)
+  }
+  const stream = createWriteStream(outPath, { flags: 'w' })
+
+  // 1) page through esearch to gather PMIDs
+  console.log(`▶ ${key}`)
+  console.log(`  query: ${query}`)
+  const allIds = []
+  let cursor = 0
+  let total = Infinity
+  const page = Math.min(1000, retmax)
+  while (cursor < retmax && cursor < total) {
+    const { ids, total: t } = await esearchPMIDs(query, Math.min(page, retmax - cursor), cursor, limiter)
+    if (t < total) total = t
+    if (ids.length === 0) break
+    allIds.push(...ids)
+    cursor += ids.length
+    process.stdout.write(`  esearch: ${allIds.length}/${Math.min(retmax, total)}\r`)
+  }
+  process.stdout.write('\n')
+  console.log(`  total in PubMed: ${total} · taking: ${allIds.length}`)
+
+  // 2) efetch metadata in batches
+  let written = 0
+  for (let i = 0; i < allIds.length; i += BATCH_FETCH) {
+    const batch = allIds.slice(i, i + BATCH_FETCH)
+    const records = await efetchBatch(batch, limiter)
+    for (const rec of records) {
+      if (!rec.pmid || !rec.title) continue
+      stream.write(JSON.stringify({ seed: key, ...rec }) + '\n')
+      written++
+    }
+    process.stdout.write(`  efetch: ${Math.min(i + BATCH_FETCH, allIds.length)}/${allIds.length} · written ${written}\r`)
+  }
+  process.stdout.write('\n')
+
+  await new Promise(r => stream.end(r))
+  const size = statSync(outPath).size
+  console.log(`✓ ${key} → ${outPath} (${written} records, ${(size / 1024).toFixed(1)} KB)\n`)
+  return { key, written, path: outPath }
+}
+
+// ─────────────────────────────── entrypoint ─────────────────────────────────
+
+async function main() {
+  const seedsCfg = JSON.parse(readFileSync(SEEDS_PATH, 'utf-8'))
+  const filter = process.argv.slice(2)
+  const entries = Object.entries(seedsCfg.seeds)
+    .filter(([k]) => filter.length === 0 || filter.includes(k))
+
+  if (entries.length === 0) {
+    console.error('No matching seed. Available:')
+    for (const k of Object.keys(seedsCfg.seeds)) console.error(`  ${k}`)
+    process.exit(1)
+  }
+
+  console.log(`PaperFate · PubMed collector`)
+  console.log(`API key: ${API_KEY ? 'yes (10 req/s)' : 'no (≈3 req/s, set NCBI_API_KEY for faster)'}`)
+  console.log(`Output : ${OUT_DIR}`)
+  console.log(`Seeds  : ${entries.length}`)
+  console.log('')
+
+  const summary = []
+  const startedAt = Date.now()
+  for (const [key, query] of entries) {
+    try {
+      const r = await collectSeed(key, query, { retmax: seedsCfg._retmaxPerSeed || 2000 })
+      summary.push(r)
+    } catch (e) {
+      console.error(`✗ ${key} failed:`, e.message)
+      summary.push({ key, error: e.message })
+    }
+  }
+
+  const mins = ((Date.now() - startedAt) / 60000).toFixed(1)
+  console.log('───────────────────────────────────────')
+  console.log('Summary')
+  for (const s of summary) {
+    if (s.error) console.log(`  ${s.key}: ERROR ${s.error}`)
+    else        console.log(`  ${s.key}: ${s.written} records`)
+  }
+  console.log(`Done in ${mins} min`)
+}
+
+main().catch(err => { console.error(err); process.exit(1) })

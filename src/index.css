@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-slate-100 font-sans antialiased;
+    background-image:
+      radial-gradient(800px 400px at 10% -10%, rgba(124, 58, 237, 0.18), transparent 60%),
+      radial-gradient(700px 500px at 110% 10%, rgba(139, 92, 246, 0.12), transparent 60%);
+  }
+}
+
+@layer components {
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(90deg, #c4b5fd, #a78bfa, #7c3aed, #a78bfa, #c4b5fd);
+    background-size: 200% 100%;
+    animation: shimmer 6s linear infinite;
+  }
+  .card {
+    @apply rounded-2xl border border-white/5 bg-ink-800/60 backdrop-blur-sm;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-fate-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-fate-600/20 transition hover:bg-fate-500 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300;
+  }
+  .input {
+    @apply w-full rounded-lg border border-white/10 bg-ink-900 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 transition focus:border-fate-500/60 focus:outline-none focus:ring-2 focus:ring-fate-500/30;
+  }
+}
