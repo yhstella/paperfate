@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { simulate } from '../lib/mockEngine.js'
+import { useMemo, useState } from 'react'
+import { forecast } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
+import DomainRollup from './DomainRollup.jsx'
 
 const FIELDS = [
   'Auto-detect',
@@ -27,7 +28,6 @@ const STUDY_TYPES = [
 
 const TARGETS = ['Auto-recommend', 'IF <5', 'IF 5–10', 'IF 10–15', 'IF 15–25', 'IF >25 (top-tier)']
 
-// A general, balanced sample (cardiovascular RCT) so the demo doesn't lean to any one specialty.
 const SAMPLE = {
   title: 'Empagliflozin and major adverse cardiovascular events in adults with chronic kidney disease',
   text: `Background: SGLT2 inhibitors reduce cardiovascular events in patients with type 2 diabetes, but their effect in adults with chronic kidney disease (CKD) without diabetes is uncertain.
@@ -37,15 +37,28 @@ Conclusions: Empagliflozin reduced the risk of kidney-disease progression or car
   inputMode: 'abstract',
 }
 
-const PLACEHOLDER = `Paste your abstract here. PaperFate will read it and auto-detect study type, sample size, validation, and field — you can correct anything below before simulating.
+const PLACEHOLDER = `Paste your abstract here. PaperFate will read it and auto-detect study type, sample size, field, and endpoints — you can correct anything below before simulating.
 
 Tip: structured abstracts (Background / Methods / Results / Conclusions) give the sharpest forecast.`
 
+const STUDY_TYPE_TO_ARTICLE_TYPE = {
+  'Randomized controlled trial':        'RCT',
+  'Meta-analysis / systematic review':  'meta_analysis',
+  'Multicenter retrospective cohort':   'clinical_cohort',
+  'Prospective cohort':                 'clinical_cohort',
+  'Retrospective cohort':               'clinical_cohort',
+  'Case-control':                       'case_control',
+  'Cross-sectional':                    'cross_sectional',
+  'Modeling / AI':                      'prediction_model',
+  'Basic / translational':              'basic_translational',
+  'Other':                              '*',
+}
+
 export default function Simulator() {
-  const [inputMode, setInputMode] = useState('abstract') // 'abstract' | 'full'
+  const [inputMode, setInputMode] = useState('abstract')
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
-  const [overrides, setOverrides] = useState({}) // user corrections, by key
+  const [overrides, setOverrides] = useState({})
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
@@ -75,24 +88,31 @@ export default function Simulator() {
     if (!canRun) return
     setStatus('running')
     setResult(null)
-    await new Promise(r => setTimeout(r, 1300))
+    const studyType = get('studyType', 'Other')
+    const articleType = STUDY_TYPE_TO_ARTICLE_TYPE[studyType] || '*'
     const input = {
       title,
-      abstract: text,                            // mockEngine reads this field
-      field:      get('field', 'Other'),
-      studyType:  get('studyType', 'Other'),
-      sampleSize: get('sampleSize', 0),
-      validation: get('validation', 'Not applicable'),
-      target:     overrides.target && overrides.target !== 'Auto-recommend' ? overrides.target : 'IF 5–10',
+      abstract: text,
+      field:       get('field', 'Other'),
+      studyType,
+      sampleSize:  get('sampleSize', 0),
+      article_type: articleType,
       multicenter: meta.multicenter?.value || false,
       endpoints:   meta.endpoints?.value || [],
-      inputMode,
+      target:      overrides.target && overrides.target !== 'Auto-recommend' ? overrides.target : 'IF 5–10',
+      mode: inputMode === 'full' ? 'Q500' : 'Q100',
     }
-    setResult(simulate(input))
-    setStatus('done')
-    setTimeout(() => {
-      document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 60)
+    try {
+      const r = await forecast(input, { useMock: true, fallbackMock: true })
+      setResult(r)
+      setStatus('done')
+      setTimeout(() => {
+        document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 60)
+    } catch (err) {
+      console.error('forecast failed:', err)
+      setStatus('idle')
+    }
   }
 
   return (
@@ -102,8 +122,8 @@ export default function Simulator() {
           <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">The simulator</h2>
           <p className="mt-3 text-slate-400">
             Paste your title and abstract — or the full manuscript. PaperFate reads the text,
-            auto-detects what it can (study type, sample size, validation, field, endpoints),
-            and returns a probabilistic forecast.
+            auto-detects what it can (study type, sample size, field, endpoints), and returns
+            a probabilistic forecast.
           </p>
           <ul className="mt-6 space-y-2 text-sm text-slate-400">
             <Bullet>One text box. Structured fields are inferred, not asked.</Bullet>
@@ -173,10 +193,44 @@ export default function Simulator() {
 
       <div id="result" className="mt-10 scroll-mt-24">
         {status === 'running' && <SkeletonResult />}
-        {status === 'done' && result && <ResultPanel result={result} input={{ title, abstract: text }} />}
+        {status === 'done' && result && (
+          <div className="space-y-6">
+            <ResultPanel result={resultLegacyShape(result)} input={{ title, abstract: text }} />
+            {result.domain_rollup?.length > 0 && (
+              <div className="card p-6 animate-fade-up">
+                <DomainRollup
+                  rollup={result.domain_rollup}
+                  keyWeaknesses={result.key_weaknesses}
+                />
+                {result.mock_fallback_reason && (
+                  <div className="mt-4 text-[11px] text-slate-500">
+                    ⓘ Server unavailable, showing local mock result. Reason: <code className="text-slate-400">{result.mock_fallback_reason}</code>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   )
+}
+
+// Adapts the new server schema back to the shape ResultPanel was originally
+// designed for, so the existing 6-card layout still renders.
+function resultLegacyShape(r) {
+  if (r?.legacy) return r.legacy   // already the mock shape
+  // Otherwise, derive a legacy-like view from the new schema
+  return {
+    score: r.overall_score ?? null,
+    tier: { range: 'TBD', bestFit: 'TBD', stretch: 'TBD' },
+    deskReject: { pct: null, label: '—' },
+    timeline: { weeks: '—', note: 'Awaiting server-side forecast wiring' },
+    citation: { range: '—', percentile: null, peerMedian: null },
+    weakness: r.key_weaknesses?.[0]?.rationale || 'See domain rollup below.',
+    suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => `${w.name}: ${w.rationale}`),
+    similars: [],
+  }
 }
 
 function DetectedPanel({ meta, overrides, setOverride, targetValue }) {
@@ -184,7 +238,6 @@ function DetectedPanel({ meta, overrides, setOverride, targetValue }) {
     { key: 'field',      label: 'Field',       options: FIELDS,       detected: meta.field?.value,      confidence: meta.field?.confidence },
     { key: 'studyType',  label: 'Study type',  options: STUDY_TYPES,  detected: meta.studyType?.value,  confidence: meta.studyType?.confidence },
     { key: 'sampleSize', label: 'Sample size', input: true,           detected: meta.sampleSize?.value, confidence: meta.sampleSize?.confidence },
-    { key: 'validation', label: 'Validation',  options: ['Auto-detect','Not applicable','Internal only','External (1 cohort)','External (2 cohorts)','External (≥3 cohorts)'], detected: meta.validation?.value, confidence: meta.validation?.confidence },
   ]
   return (
     <div className="rounded-xl border border-white/5 bg-ink-900/50 p-4">
