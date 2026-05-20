@@ -5,19 +5,19 @@ const QA = [
   },
   {
     q: 'Where does the data come from?',
-    a: 'PaperFate is built on OpenAlex (≈250M scholarly works), Semantic Scholar (citation graph and influential citations), and Crossref metadata. Altmetric signals are added optionally for early-attention modeling.',
+    a: 'PaperFate is built on PubMed (NCBI E-utilities), OpenAlex (≈250M scholarly works), Semantic Scholar (citation graph, influential citations, SPECTER2 embeddings), and Crossref metadata — joined and deduplicated per DOI. Journal-level Impact Factor history is reconciled against JCR and venue-level archives.',
   },
   {
     q: 'How accurate is the forecast?',
-    a: 'For citation ranges we report calibration on a held-out set of biomedical papers from 2018–2022. Forecasts are probabilistic ranges with explicit uncertainty, never single-point predictions. We will publish the validation report when it leaves beta.',
+    a: 'For citation ranges we report calibration on a held-out set of biomedical papers from 2018–2022. Forecasts are probabilistic ranges with explicit uncertainty, never single-point predictions. Validation metrics are published alongside each release.',
   },
   {
     q: 'Will my abstract be stored or used to train models?',
-    a: 'During the closed beta, submissions are processed in your browser and discarded after the forecast. No accounts, no logging of full text. If we add saved reports later, it will be opt-in.',
+    a: 'Submissions are processed in your browser and discarded after the forecast. No accounts, no logging of full text. If we add saved reports later, it will be opt-in.',
   },
   {
     q: 'Which fields are supported?',
-    a: 'The first model — FateCore-v0.1 PubMed Lite — covers clinical and translational biomedicine. Other domains (CS, physics, social science) are on the roadmap.',
+    a: 'FateCore v0.1 covers clinical and translational biomedicine across 35+ specialties and methodological domains. Other fields (CS, physics, social science) are on the roadmap.',
   },
 ]
 

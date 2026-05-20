@@ -25,7 +25,7 @@ export default function Hero() {
             <a href="#features" className="btn-ghost">See what it predicts</a>
           </div>
           <p className="mt-4 text-xs text-slate-500">
-            Free during beta · No account required · Built on OpenAlex &amp; Semantic Scholar
+            Free · No account required · Built on PubMed, OpenAlex, Semantic Scholar and Crossref
           </p>
         </div>
       </div>
