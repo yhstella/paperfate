@@ -13,11 +13,11 @@ const QA = [
   },
   {
     q: 'Will my abstract be stored or used to train models?',
-    a: 'Submissions are processed in your browser and discarded after the forecast. No accounts, no logging of full text. If we add saved reports later, it will be opt-in.',
+    a: 'Submissions are processed in your browser and discarded after the forecast. No accounts, no logging of full text. Saved reports are opt-in.',
   },
   {
     q: 'Which fields are supported?',
-    a: 'FateCore v0.1 covers clinical and translational biomedicine across 35+ specialties and methodological domains. Other fields (CS, physics, social science) are on the roadmap.',
+    a: 'FateCore v0.1 covers clinical and translational biomedicine across 35+ specialties and methodological domains — internal medicine, surgery, oncology, neurology, methodology (RCTs, meta-analysis, AI/ML, decision curve, external validation), and more.',
   },
 ]
 

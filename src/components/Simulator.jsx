@@ -184,7 +184,7 @@ export default function Simulator() {
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-xs text-slate-500">
-                Nothing is stored. The beta runs locally in your browser.
+                Nothing is stored. All processing runs locally in your browser.
               </p>
               <button disabled={!canRun || status === 'running'} className="btn-primary">
                 {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}

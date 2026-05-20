@@ -7,8 +7,8 @@ export default function Footer() {
           <div>Simulate your manuscript's future before submission.</div>
         </div>
         <div className="flex flex-col items-start gap-1 sm:items-end">
-          <div>Built on OpenAlex · Semantic Scholar · Crossref</div>
-          <div className="text-xs text-slate-600">© {new Date().getFullYear()} PaperFate · FateCore v0.1 Beta</div>
+          <div>Multi-source biomedical corpus</div>
+          <div className="text-xs text-slate-600">© {new Date().getFullYear()} PaperFate · FateCore v0.1</div>
         </div>
       </div>
     </footer>
