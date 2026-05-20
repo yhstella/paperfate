@@ -3,6 +3,7 @@ import { forecast } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
+import FileUpload from './FileUpload.jsx'
 
 const FIELDS = [
   'Auto-detect',
@@ -166,13 +167,21 @@ export default function Simulator() {
               />
             </Field>
 
-            <Field label={inputMode === 'full' ? 'Full manuscript' : 'Abstract'}>
-              <textarea
-                value={text} onChange={e => setText(e.target.value)}
-                rows={inputMode === 'full' ? 14 : 9}
-                placeholder={PLACEHOLDER}
-                className="input resize-y leading-relaxed"
-              />
+            <Field label={inputMode === 'full' ? 'Full manuscript file' : 'Abstract'}>
+              {inputMode === 'full' ? (
+                <FileUpload
+                  onText={setText}
+                  currentTextLength={charCount}
+                  hint="Headings, tables, and references are extracted as plain text. Figures are skipped."
+                />
+              ) : (
+                <textarea
+                  value={text} onChange={e => setText(e.target.value)}
+                  rows={9}
+                  placeholder={PLACEHOLDER}
+                  className="input resize-y leading-relaxed"
+                />
+              )}
             </Field>
 
             <DetectedPanel
