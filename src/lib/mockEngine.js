@@ -154,6 +154,7 @@ export function simulate(input) {
   const suggestions = buildSuggestions({ text, input, score100, novelty, gen, clinical, validationApplies, baseTierIndex })
 
   const similars = pickSimilars(input.field, text).slice(0, 4)
+  const journey = buildJourney({ field: input.field, tier, tierIndex, similars })
 
   return {
     score: Math.round(score100),
@@ -164,7 +165,79 @@ export function simulate(input) {
     weakness,
     suggestions,
     similars,
+    journey,
   }
+}
+
+// Mock journey: 3-stop sequence, descending tier, with reasoning about
+// formatting/checklist overlap. Real algorithm (post-SSD) will use the
+// `journal_submission_style` table and pairwise switch costs.
+function buildJourney({ field, tier, tierIndex, similars }) {
+  const STEPS_BY_FIELD = {
+    Cardiology: [
+      { venue: 'Circulation',          if: 39.9,  publisher: 'Wolters Kluwer',     style: 'Vancouver / structured abstract' },
+      { venue: 'European Heart Journal', if: 39.3, publisher: 'Oxford Univ Press',   style: 'Vancouver / structured abstract' },
+      { venue: 'JACC',                  if: 24.0,  publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'Heart',                 if: 5.1,   publisher: 'BMJ',                style: 'Vancouver / structured abstract' },
+    ],
+    Oncology: [
+      { venue: 'Lancet Oncology',       if: 51.1,  publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'Annals of Oncology',    if: 51.8,  publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'JAMA Oncology',         if: 30.8,  publisher: 'AMA',                style: 'AMA / structured abstract' },
+      { venue: 'Clinical Cancer Research', if: 11.5, publisher: 'AACR',             style: 'Numbered / structured abstract' },
+    ],
+    Hepatology: [
+      { venue: 'Journal of Hepatology', if: 26.8,  publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'Hepatology',            if: 13.5,  publisher: 'Wolters Kluwer',     style: 'Vancouver / structured abstract' },
+      { venue: 'Clin Gastroenterol Hepatol', if: 11.6, publisher: 'Elsevier',       style: 'Vancouver / structured abstract' },
+      { venue: 'Liver International',   if: 6.7,   publisher: 'Wiley',              style: 'Vancouver / structured abstract' },
+    ],
+    Endocrinology: [
+      { venue: 'Lancet Diabetes Endocrinol', if: 44.0, publisher: 'Elsevier',       style: 'Vancouver / structured abstract' },
+      { venue: 'Diabetes Care',         if: 16.2,  publisher: 'ADA',                style: 'Vancouver / structured abstract' },
+      { venue: 'JCEM',                  if: 5.8,   publisher: 'Oxford Univ Press',   style: 'Vancouver / structured abstract' },
+      { venue: 'Diabetologia',          if: 8.4,   publisher: 'Springer',           style: 'Vancouver / structured abstract' },
+    ],
+    Neurology: [
+      { venue: 'Lancet Neurology',      if: 48.0,  publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'JAMA Neurology',        if: 25.0,  publisher: 'AMA',                style: 'AMA / structured abstract' },
+      { venue: 'Neurology',             if: 9.9,   publisher: 'Wolters Kluwer',     style: 'Vancouver / structured abstract' },
+      { venue: 'Annals of Neurology',   if: 10.6,  publisher: 'Wiley',              style: 'Vancouver / structured abstract' },
+    ],
+    default: [
+      { venue: 'Lancet',                if: 168.9, publisher: 'Elsevier',           style: 'Vancouver / structured abstract' },
+      { venue: 'BMJ',                   if: 105.7, publisher: 'BMJ',                style: 'Vancouver / structured abstract' },
+      { venue: 'JAMA',                  if: 120.7, publisher: 'AMA',                style: 'AMA / structured abstract' },
+      { venue: 'JAMA Internal Medicine', if: 36.4, publisher: 'AMA',                style: 'AMA / structured abstract' },
+    ],
+  }
+  const pool = STEPS_BY_FIELD[field] || STEPS_BY_FIELD.default
+  // Pick a start journal near the user's tier, then descend; assemble 3 steps
+  // and tag each transition with a switch-cost label.
+  const sorted = [...pool].sort((a, b) => b.if - a.if)
+  // For each step, mark switch-cost vs previous (lower if same publisher or style)
+  return sorted.slice(0, 3).map((step, i, arr) => {
+    const prev = arr[i - 1]
+    let switchCost = i === 0 ? 'first submission' : 'low'
+    let switchReason = i === 0 ? 'highest-impact target in scope' : ''
+    if (prev) {
+      const samePub = prev.publisher === step.publisher
+      const sameStyle = prev.style === step.style
+      if (samePub && sameStyle) { switchCost = 'minimal'; switchReason = 'same publisher · same reference style — almost no rework' }
+      else if (sameStyle) { switchCost = 'low'; switchReason = 'shared structured-abstract format and reference style' }
+      else if (samePub) { switchCost = 'low'; switchReason = 'same publisher — submission system carries over' }
+      else { switchCost = 'medium'; switchReason = `switch reference style to ${step.style.split(' ')[0]}` }
+    }
+    return {
+      step: i + 1,
+      venue: step.venue,
+      if: step.if,
+      publisher: step.publisher,
+      style: step.style,
+      switchCost,
+      switchReason,
+    }
+  })
 }
 
 function score(text, words) {

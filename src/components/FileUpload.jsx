@@ -48,7 +48,9 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
         type="file"
         accept={ACCEPTED}
         onChange={(e) => handleFile(e.target.files?.[0])}
-        className="hidden"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
       />
       {!filename && (
         <div

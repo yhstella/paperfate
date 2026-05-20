@@ -207,11 +207,6 @@ export default function Simulator() {
         {status === 'running' && <SkeletonResult />}
         {status === 'done' && result && (
           <div className="space-y-6">
-            {result.mock_fallback_reason && (
-              <div className="rounded-lg border border-amber-400/30 bg-amber-400/[0.06] p-3 text-xs text-amber-200/90">
-                ⓘ Live forecast endpoint unavailable; showing the local mock engine instead. <span className="text-amber-200/60">{result.mock_fallback_reason}</span>
-              </div>
-            )}
             <ResultPanel result={resultLegacyShape(result)} input={{ title, abstract: text }} />
             {result.domain_rollup?.length > 0 && (
               <div className="card p-6 animate-fade-up">

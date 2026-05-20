@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -79,6 +79,47 @@ export default function ResultPanel({ result, input }) {
           </ul>
         </div>
       </div>
+
+      {journey && journey.length > 0 && (
+        <div className="mt-8">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">
+            Recommended submission journey
+          </h3>
+          <p className="mb-4 text-xs text-slate-500">
+            An ordered sequence to try if a submission is declined. Each step is chosen so the
+            manuscript needs minimal reformatting to move on.
+          </p>
+          <ol className="space-y-3">
+            {journey.map((j, i) => (
+              <li key={i} className="flex gap-3 rounded-lg border border-white/5 bg-ink-900/60 p-4">
+                <div className="flex-none">
+                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-fate-500/20 text-xs font-semibold text-fate-300">
+                    {j.step}
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="font-semibold text-slate-100">{j.venue}</span>
+                    <span className="chip">IF {j.if}</span>
+                    <span className="chip">{j.publisher}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">{j.style}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`chip ${
+                      j.switchCost === 'minimal' || j.switchCost === 'first submission' ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' :
+                      j.switchCost === 'low' ? 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' :
+                      'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]'
+                    }`}>
+                      {i === 0 ? 'start' : `switch cost · ${j.switchCost}`}
+                    </span>
+                    {j.switchReason && <span className="text-slate-400">{j.switchReason}</span>}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       <p className="mt-6 text-xs text-slate-500">
         ⓘ Forecast is probabilistic, not a guarantee. PaperFate compares your manuscript against

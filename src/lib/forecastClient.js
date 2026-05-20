@@ -30,6 +30,7 @@ function adaptMockToServer(mockResult, input) {
       weakness:   mockResult.weakness,
       suggestions: mockResult.suggestions,
       similars:   mockResult.similars,
+      journey:    mockResult.journey,
     },
     rubric_version: 'mock',
   }
