@@ -1,15 +1,15 @@
 const PILLARS = [
   {
-    title: 'Retrieval',
-    body: 'SPECTER2 scientific embeddings (768-dim) match your manuscript against papers with comparable topic, design, and venue history.',
+    title: 'Multi-dimensional features',
+    body: 'AI-engineered variables capture manuscript topic, study design, venue history, and citation dynamics — distilled from a curated biomedical corpus into structured manuscript-level signals.',
   },
   {
-    title: 'Rubric',
-    body: 'Q500 — a 500-item evaluation framework across 14 reporting domains (CONSORT, STROBE, TRIPOD, PRISMA), with a Q100 abstract-only subset for early forecasts.',
+    title: 'Outcome-grounded',
+    body: 'Trained on real publication outcomes — actual journal placement, citation trajectories, and review timelines — across thousands of biomedical papers.',
   },
   {
-    title: 'Calibration',
-    body: 'Journal-year-stratified models for citation range, desk-reject probability, and review timeline — anchored to real JCR Impact Factor records and per-venue acceptance patterns.',
+    title: 'Validated',
+    body: 'Calibrated against held-out biomedical literature and real Impact Factor records. Validation metrics are reported with each release.',
   },
 ]
 
@@ -46,7 +46,7 @@ export default function AboutFateCore() {
           <Stat label="Papers in corpus" value="200K+" hint="biomedical, 2005–2025" />
           <Stat label="Journals covered" value="4,400+" hint="with IF history" />
           <Stat label="Specialties" value="35+" hint="clinical + methodological" />
-          <Stat label="Embedding dim" value="768" hint="SPECTER2" />
+          <Stat label="Data sources" value="6" hint="multi-source corpus" />
         </dl>
 
         <p className="mt-10 max-w-3xl text-sm text-slate-400">
