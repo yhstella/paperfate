@@ -133,8 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_journals_name  ON journals(display_name);
 CREATE INDEX IF NOT EXISTS idx_journals_ifproxy ON journals(two_yr_mean_citedness);
 
 -- One row per (journal × year) — supports tracking IF-proxy drift, SJR moves,
--- quartile changes, etc. Source records (oa = OpenAlex 2yr_mean_citedness,
--- sjr = Scimago Journal Rank) live side-by-side.
+-- quartile changes, and the real JCR JIF over time.
 CREATE TABLE IF NOT EXISTS journal_year_metrics (
   openalex_id            TEXT,
   issn                   TEXT,
@@ -157,12 +156,28 @@ CREATE TABLE IF NOT EXISTS journal_year_metrics (
   scimago_publisher      TEXT,
   scimago_categories     TEXT,
   scimago_areas          TEXT,
+  -- From JCR (Clarivate JIF) — local-only training/calibration signal.
+  jcr_jif                REAL,         -- ground-truth JIF for this (journal, year)
+  jcr_jif_5yr            REAL,         -- 5-Year JIF
+  jcr_jif_no_self        REAL,         -- JIF without self-citations
+  jci                    REAL,         -- Journal Citation Indicator
+  jcr_quartile           TEXT,         -- Q1/Q2/Q3/Q4
+  jcr_category           TEXT,         -- e.g., "ONCOLOGY"
+  jcr_rank               INTEGER,
+  jcr_total_in_category  INTEGER,
+  jcr_publisher          TEXT,
+  jcr_total_cites        INTEGER,
+  jcr_total_articles     INTEGER,
+  jcr_citable_items      INTEGER,
+  jcr_source_file        TEXT,
   ingested_at            TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (openalex_id, year)
 );
-CREATE INDEX IF NOT EXISTS idx_jym_year ON journal_year_metrics(year);
-CREATE INDEX IF NOT EXISTS idx_jym_issn ON journal_year_metrics(issn);
-CREATE INDEX IF NOT EXISTS idx_jym_sjr  ON journal_year_metrics(sjr);
+CREATE INDEX IF NOT EXISTS idx_jym_year  ON journal_year_metrics(year);
+CREATE INDEX IF NOT EXISTS idx_jym_issn  ON journal_year_metrics(issn);
+CREATE INDEX IF NOT EXISTS idx_jym_sjr   ON journal_year_metrics(sjr);
+CREATE INDEX IF NOT EXISTS idx_jym_jcr_q ON journal_year_metrics(jcr_quartile);
+CREATE INDEX IF NOT EXISTS idx_jym_jif   ON journal_year_metrics(jcr_jif);
 `
 
 function openDb() {
@@ -171,11 +186,52 @@ function openDb() {
   db.pragma('synchronous = NORMAL')
   db.pragma('temp_store = MEMORY')
   if (RESET) {
-    db.exec('DROP TABLE IF EXISTS papers; DROP TABLE IF EXISTS ingest_runs;')
+    db.exec('DROP TABLE IF EXISTS papers; DROP TABLE IF EXISTS journals; DROP TABLE IF EXISTS journal_year_metrics; DROP TABLE IF EXISTS ingest_runs;')
     console.log('Dropped existing tables (--reset)')
   }
+  // Note: CREATE TABLE IF NOT EXISTS skips altered columns on pre-existing
+  // tables. Run lightweight column-add migrations BEFORE the schema block
+  // creates indexes that depend on the new columns.
+  migrateAddMissingColumns(db)
   db.exec(SCHEMA)
   return db
+}
+
+// Lightweight column-only migration: ALTER TABLE ADD COLUMN if a column is
+// missing. Idempotent — re-runnable.
+function migrateAddMissingColumns(db) {
+  const tableExists = (t) => !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(t)
+  function existingCols(table) {
+    if (!tableExists(table)) return new Set()
+    return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name))
+  }
+  function addColumns(table, defs) {
+    if (!tableExists(table)) return
+    const existing = existingCols(table)
+    for (const [name, type] of defs) {
+      if (existing.has(name)) continue
+      try {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`)
+        console.log(`  migrated: ${table}.${name} ${type}`)
+      } catch (e) { console.warn(`  migration skipped: ${table}.${name} (${e.message})`) }
+    }
+  }
+  // JCR fields added 2026-05-20
+  addColumns('journal_year_metrics', [
+    ['jcr_jif',               'REAL'],
+    ['jcr_jif_5yr',           'REAL'],
+    ['jcr_jif_no_self',       'REAL'],
+    ['jci',                   'REAL'],
+    ['jcr_quartile',          'TEXT'],
+    ['jcr_category',          'TEXT'],
+    ['jcr_rank',              'INTEGER'],
+    ['jcr_total_in_category', 'INTEGER'],
+    ['jcr_publisher',         'TEXT'],
+    ['jcr_total_cites',       'INTEGER'],
+    ['jcr_total_articles',    'INTEGER'],
+    ['jcr_citable_items',     'INTEGER'],
+    ['jcr_source_file',       'TEXT'],
+  ])
 }
 
 function listJsonl(subdir) {
@@ -618,6 +674,83 @@ function ingestScimago(db) {
   }
 }
 
+// ────────────────── JCR JIF ingestion (per-journal × per-year IF) ──────────
+function ingestJCR(db) {
+  const files = listJsonl('jcr')
+  if (files.length === 0) { console.log('JCR: no files. Run scripts/import-jcr.mjs first.'); return }
+  // Build ISSN→openalex_id map for join (same approach as Scimago)
+  const issnToOa = new Map()
+  for (const row of db.prepare('SELECT openalex_id, issn_l, issn_json FROM journals').all()) {
+    if (row.issn_l) issnToOa.set(row.issn_l, row.openalex_id)
+    try {
+      for (const i of JSON.parse(row.issn_json || '[]')) issnToOa.set(i, row.openalex_id)
+    } catch {}
+  }
+  console.log(`  JCR ISSN→openalex_id map: ${issnToOa.size}`)
+  const upd = db.prepare(`
+    INSERT INTO journal_year_metrics (
+      openalex_id, issn, year,
+      jcr_jif, jcr_jif_5yr, jcr_jif_no_self, jci, jcr_quartile, jcr_category,
+      jcr_rank, jcr_total_in_category, jcr_publisher,
+      jcr_total_cites, jcr_total_articles, jcr_citable_items, jcr_source_file
+    ) VALUES (
+      @openalex_id, @issn, @year,
+      @jcr_jif, @jcr_jif_5yr, @jcr_jif_no_self, @jci, @jcr_quartile, @jcr_category,
+      @jcr_rank, @jcr_total_in_category, @jcr_publisher,
+      @jcr_total_cites, @jcr_total_articles, @jcr_citable_items, @jcr_source_file
+    )
+    ON CONFLICT(openalex_id, year) DO UPDATE SET
+      jcr_jif              = excluded.jcr_jif,
+      jcr_jif_5yr          = excluded.jcr_jif_5yr,
+      jcr_jif_no_self      = excluded.jcr_jif_no_self,
+      jci                  = excluded.jci,
+      jcr_quartile         = COALESCE(excluded.jcr_quartile, jcr_quartile),
+      jcr_category         = COALESCE(excluded.jcr_category, jcr_category),
+      jcr_rank             = COALESCE(excluded.jcr_rank, jcr_rank),
+      jcr_total_in_category= COALESCE(excluded.jcr_total_in_category, jcr_total_in_category),
+      jcr_publisher        = COALESCE(excluded.jcr_publisher, jcr_publisher),
+      jcr_total_cites      = COALESCE(excluded.jcr_total_cites, jcr_total_cites),
+      jcr_total_articles   = COALESCE(excluded.jcr_total_articles, jcr_total_articles),
+      jcr_citable_items    = COALESCE(excluded.jcr_citable_items, jcr_citable_items),
+      jcr_source_file      = excluded.jcr_source_file,
+      issn                 = COALESCE(excluded.issn, issn)
+  `)
+  for (const f of files) {
+    const startedAt = new Date().toISOString()
+    let seen = 0, matched = 0, unmatched = 0
+    db.transaction(() => {
+      for (const rec of readJsonl(f)) {
+        seen++
+        const candIssns = [rec.issn, rec.eissn].filter(Boolean)
+        let oa = null
+        for (const i of candIssns) if (issnToOa.has(i)) { oa = issnToOa.get(i); break }
+        if (!oa) { unmatched++; continue }
+        upd.run({
+          openalex_id:           oa,
+          issn:                  rec.issn || rec.eissn || null,
+          year:                  rec.year,
+          jcr_jif:               rec.jif ?? null,
+          jcr_jif_5yr:           rec.jif_5yr ?? null,
+          jcr_jif_no_self:       rec.jif_no_self ?? null,
+          jci:                   rec.jci ?? null,
+          jcr_quartile:          rec.jcr_quartile || null,
+          jcr_category:          rec.jcr_category || null,
+          jcr_rank:              rec.jcr_rank ?? null,
+          jcr_total_in_category: rec.jcr_total_in_category ?? null,
+          jcr_publisher:         rec.publisher || null,
+          jcr_total_cites:       rec.total_cites ?? null,
+          jcr_total_articles:    rec.total_articles ?? null,
+          jcr_citable_items:     rec.citable_items ?? null,
+          jcr_source_file:       rec.source_file || null,
+        })
+        matched++
+      }
+    })()
+    logRun(db, 'jcr', f, seen, matched, startedAt)
+    console.log(`  jcr: ${f.split(/[\\/]/).pop()}  seen=${seen} matched=${matched} unmatched=${unmatched}`)
+  }
+}
+
 function summary(db) {
   const row = db.prepare(`
     SELECT
@@ -636,7 +769,10 @@ function summary(db) {
       (SELECT COUNT(*) FROM journal_year_metrics)      AS journal_year_rows,
       (SELECT COUNT(DISTINCT year) FROM journal_year_metrics) AS years_covered,
       (SELECT COUNT(*) FROM journal_year_metrics WHERE sjr IS NOT NULL) AS scimago_rows,
-      (SELECT ROUND(AVG(two_yr_mean_citedness), 2) FROM journals WHERE two_yr_mean_citedness IS NOT NULL) AS avg_if_proxy
+      (SELECT COUNT(*) FROM journal_year_metrics WHERE jcr_jif IS NOT NULL) AS jcr_rows,
+      (SELECT COUNT(DISTINCT openalex_id) FROM journal_year_metrics WHERE jcr_jif IS NOT NULL) AS journals_with_jcr,
+      (SELECT ROUND(AVG(two_yr_mean_citedness), 2) FROM journals WHERE two_yr_mean_citedness IS NOT NULL) AS avg_if_proxy,
+      (SELECT ROUND(AVG(jcr_jif), 2) FROM journal_year_metrics WHERE jcr_jif IS NOT NULL) AS avg_jcr_jif
   `).get()
   console.log('\n── DB summary (papers) ──')
   for (const [k, v] of Object.entries(row)) console.log(`  ${k.padEnd(24)} ${v}`)
@@ -665,6 +801,8 @@ async function main() {
   ingestOpenAlexSources(db)
   console.log('── ingesting Scimago ──')
   ingestScimago(db)
+  console.log('── ingesting JCR JIF ──')
+  ingestJCR(db)
 
   summary(db)
   console.log(`\nTotal elapsed: ${((Date.now() - started) / 1000).toFixed(1)}s`)
