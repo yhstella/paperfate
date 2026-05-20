@@ -5,11 +5,11 @@ const QA = [
   },
   {
     q: 'Where does the data come from?',
-    a: 'PaperFate is built on PubMed (NCBI E-utilities), OpenAlex (≈250M scholarly works), Semantic Scholar (citation graph, influential citations, SPECTER2 embeddings), and Crossref metadata — joined and deduplicated per DOI. Journal-level Impact Factor history is reconciled against JCR and venue-level archives.',
+    a: 'PaperFate is built on a curated multi-source biomedical corpus, integrating peer-reviewed scholarly databases and journal-level metric history. Records are joined and deduplicated for consistency.',
   },
   {
     q: 'How accurate is the forecast?',
-    a: 'For citation ranges we report calibration on a held-out set of biomedical papers from 2018–2022. Forecasts are probabilistic ranges with explicit uncertainty, never single-point predictions. Validation metrics are published alongside each release.',
+    a: 'Forecasts are probabilistic ranges with explicit uncertainty, never single-point predictions. Calibration is performed on held-out biomedical literature; validation metrics are reported with each release.',
   },
   {
     q: 'Will my abstract be stored or used to train models?',
@@ -17,7 +17,7 @@ const QA = [
   },
   {
     q: 'Which fields are supported?',
-    a: 'FateCore v0.1 covers clinical and translational biomedicine across 35+ specialties and methodological domains — internal medicine, surgery, oncology, neurology, methodology (RCTs, meta-analysis, AI/ML, decision curve, external validation), and more.',
+    a: 'FateCore v0.1 covers clinical and translational biomedicine across 35+ specialties and methodological domains.',
   },
 ]
 

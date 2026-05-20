@@ -1,15 +1,15 @@
 const PILLARS = [
   {
     title: 'Multi-dimensional features',
-    body: 'AI-engineered variables capture manuscript topic, study design, venue history, and citation dynamics — distilled from a curated biomedical corpus into structured manuscript-level signals.',
+    body: 'Proprietary AI-engineered variables distill manuscript content and surrounding bibliometric signals into structured forecast inputs.',
   },
   {
     title: 'Outcome-grounded',
-    body: 'Trained on real publication outcomes — actual journal placement, citation trajectories, and review timelines — across thousands of biomedical papers.',
+    body: 'Trained on real publication outcomes from a curated biomedical corpus — grounded in what actually happened, not theoretical metrics.',
   },
   {
     title: 'Validated',
-    body: 'Calibrated against held-out biomedical literature and real Impact Factor records. Validation metrics are reported with each release.',
+    body: 'Calibrated against held-out biomedical literature. Validation metrics are reported with each release.',
   },
 ]
 
@@ -27,9 +27,8 @@ export default function AboutFateCore() {
           </h2>
           <p className="mt-3 text-slate-300">
             FateCore is the inference engine behind PaperFate. It is trained on a curated
-            corpus of biomedical papers with publication outcomes — actual journal placement,
-            citation trajectories, and review timelines — across 35+ clinical and methodological
-            specialties.
+            biomedical corpus with real publication outcomes, spanning clinical and
+            methodological domains.
           </p>
         </div>
 
