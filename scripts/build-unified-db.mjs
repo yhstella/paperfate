@@ -232,6 +232,16 @@ function migrateAddMissingColumns(db) {
     ['jcr_citable_items',     'INTEGER'],
     ['jcr_source_file',       'TEXT'],
   ])
+  // SchemaD additional fields (richer JCR direct exports)
+  addColumns('journal_year_metrics', [
+    ['eigenfactor',            'REAL'],
+    ['normalized_eigenfactor', 'REAL'],
+    ['article_influence',      'REAL'],
+    ['immediacy_index',        'REAL'],
+    ['jci_percentile',         'REAL'],
+    ['jif_5yr_quartile',       'TEXT'],
+    ['jcr_edition',            'TEXT'],
+  ])
 }
 
 function listJsonl(subdir) {
@@ -692,18 +702,22 @@ function ingestJCR(db) {
       openalex_id, issn, year,
       jcr_jif, jcr_jif_5yr, jcr_jif_no_self, jci, jcr_quartile, jcr_category,
       jcr_rank, jcr_total_in_category, jcr_publisher,
-      jcr_total_cites, jcr_total_articles, jcr_citable_items, jcr_source_file
+      jcr_total_cites, jcr_total_articles, jcr_citable_items, jcr_source_file,
+      eigenfactor, normalized_eigenfactor, article_influence, immediacy_index,
+      jci_percentile, jif_5yr_quartile, jcr_edition
     ) VALUES (
       @openalex_id, @issn, @year,
       @jcr_jif, @jcr_jif_5yr, @jcr_jif_no_self, @jci, @jcr_quartile, @jcr_category,
       @jcr_rank, @jcr_total_in_category, @jcr_publisher,
-      @jcr_total_cites, @jcr_total_articles, @jcr_citable_items, @jcr_source_file
+      @jcr_total_cites, @jcr_total_articles, @jcr_citable_items, @jcr_source_file,
+      @eigenfactor, @normalized_eigenfactor, @article_influence, @immediacy_index,
+      @jci_percentile, @jif_5yr_quartile, @jcr_edition
     )
     ON CONFLICT(openalex_id, year) DO UPDATE SET
-      jcr_jif              = excluded.jcr_jif,
-      jcr_jif_5yr          = excluded.jcr_jif_5yr,
-      jcr_jif_no_self      = excluded.jcr_jif_no_self,
-      jci                  = excluded.jci,
+      jcr_jif              = COALESCE(excluded.jcr_jif, jcr_jif),
+      jcr_jif_5yr          = COALESCE(excluded.jcr_jif_5yr, jcr_jif_5yr),
+      jcr_jif_no_self      = COALESCE(excluded.jcr_jif_no_self, jcr_jif_no_self),
+      jci                  = COALESCE(excluded.jci, jci),
       jcr_quartile         = COALESCE(excluded.jcr_quartile, jcr_quartile),
       jcr_category         = COALESCE(excluded.jcr_category, jcr_category),
       jcr_rank             = COALESCE(excluded.jcr_rank, jcr_rank),
@@ -713,6 +727,13 @@ function ingestJCR(db) {
       jcr_total_articles   = COALESCE(excluded.jcr_total_articles, jcr_total_articles),
       jcr_citable_items    = COALESCE(excluded.jcr_citable_items, jcr_citable_items),
       jcr_source_file      = excluded.jcr_source_file,
+      eigenfactor          = COALESCE(excluded.eigenfactor, eigenfactor),
+      normalized_eigenfactor=COALESCE(excluded.normalized_eigenfactor, normalized_eigenfactor),
+      article_influence    = COALESCE(excluded.article_influence, article_influence),
+      immediacy_index      = COALESCE(excluded.immediacy_index, immediacy_index),
+      jci_percentile       = COALESCE(excluded.jci_percentile, jci_percentile),
+      jif_5yr_quartile     = COALESCE(excluded.jif_5yr_quartile, jif_5yr_quartile),
+      jcr_edition          = COALESCE(excluded.jcr_edition, jcr_edition),
       issn                 = COALESCE(excluded.issn, issn)
   `)
   for (const f of files) {
@@ -742,6 +763,13 @@ function ingestJCR(db) {
           jcr_total_articles:    rec.total_articles ?? null,
           jcr_citable_items:     rec.citable_items ?? null,
           jcr_source_file:       rec.source_file || null,
+          eigenfactor:           rec.eigenfactor ?? null,
+          normalized_eigenfactor:rec.normalized_eigenfactor ?? null,
+          article_influence:     rec.article_influence ?? null,
+          immediacy_index:       rec.immediacy_index ?? null,
+          jci_percentile:        rec.jci_percentile ?? null,
+          jif_5yr_quartile:      rec.jif_5yr_quartile || null,
+          jcr_edition:           rec.edition || null,
         })
         matched++
       }

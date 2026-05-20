@@ -6,7 +6,8 @@
 // journal_year_metrics table (jcr_if / jcr_quartile / jcr_category / jci).
 //
 // USAGE
-//   node scripts/import-jcr.mjs
+//   node scripts/import-jcr.mjs                                # auto-discover in JCR_SOURCE_DIR
+//   node scripts/import-jcr.mjs /path/to/Custom_JCR.xlsx       # explicit file(s)
 //   JCR_SOURCE_DIR=D:/path/to/folder node scripts/import-jcr.mjs
 //
 // LICENSE NOTE — JCR data is Clarivate-licensed. PaperFate treats it as
@@ -28,6 +29,15 @@
 //     journal_name, issn, eissn, category, citations, if_2022, jci,
 //     percentageOAGold
 //     Quartile not directly in own column; extracted from category if formatted.
+//   Schema D (JCR direct-export, "<Author>_JCR_JournalResults_*.xlsx"):
+//     R0 = metadata line (e.g. "JCR Year: 2024")
+//     R1 = headers: Journal name, JCR Abbreviation, Publisher, ISSN, eISSN,
+//          Category, Edition, Total Citations, 2024 JIF (year-tagged),
+//          JIF Quartile, 2024 JCI, % of Citable OA, JIF Rank, 5 Year JIF,
+//          5 Year JIF Quartile, JIF Without Self Cites, Immediacy Index,
+//          JCI Rank, JCI Quartile, JCI Percentile, Eigenfactor,
+//          Normalized Eigenfactor, Article Influence Score, ...
+//     R2+ = data. Year derived from R0 metadata or "<YYYY> JIF" column.
 
 import XLSX from 'xlsx'
 import { mkdirSync, readdirSync, statSync, writeFileSync, existsSync } from 'node:fs'
@@ -51,15 +61,51 @@ function findJifFiles(dir) {
       try { st = statSync(full) } catch { continue }
       if (st.isDirectory()) walk(full)
       else if (/^JIF[_-]?(\d{4})\.xlsx$/i.test(name)) out.push(full)
+      else if (/JCR[_-]?JournalResults.*\.xlsx$/i.test(name)) out.push(full)
     }
   }
   walk(dir)
   return out
 }
 
+// Year detection priority:
+//  1. "<YYYY> JIF" column header from R1
+//  2. "JCR Year: <YYYY>" / "Selected JCR Year: <YYYY>" in R0 metadata
+//  3. JIF_YYYY.xlsx style file name
+function yearFromHeaders(headers) {
+  for (const h of headers) {
+    const m = String(h).match(/^\s*(\d{4})\s+JIF\s*$/i)
+    if (m) return Number(m[1])
+  }
+  return null
+}
+function yearFromMetadataRow(r0) {
+  if (!r0) return null
+  for (const cell of r0) {
+    if (!cell) continue
+    const m = String(cell).match(/(?:Selected\s+)?JCR\s+Year[:\s]+(\d{4})/i)
+    if (m) return Number(m[1])
+  }
+  return null
+}
 function yearFromFilename(p) {
-  const m = basename(p).match(/(\d{4})/)
-  return m ? Number(m[1]) : null
+  // Skip the trailing "_MM_YYYY" pattern in download timestamps — that's the
+  // download date, NOT the JCR year (which is in the metadata row instead).
+  const fname = basename(p)
+  // First try strict pattern: JIF_YYYY.xlsx
+  const strict = fname.match(/^JIF[_-]?(\d{4})\.xlsx$/i)
+  if (strict) return Number(strict[1])
+  // Otherwise scan for any 4-digit, but prefer ones not adjacent to MM_
+  const allMatches = [...fname.matchAll(/(\d{4})/g)]
+  if (allMatches.length === 0) return null
+  // Prefer the FIRST year that isn't preceded by "MM_" (download timestamp)
+  for (const m of allMatches) {
+    const idx = m.index
+    const before = fname.slice(Math.max(0, idx - 3), idx)
+    if (/^\d{2}_$/.test(before)) continue
+    return Number(m[1])
+  }
+  return Number(allMatches[0][1])
 }
 
 function toNumOrNull(s) {
@@ -89,6 +135,13 @@ function parseCategoryToken(s) {
     if (m) { out.rank = Number(m[1]); out.total_in_category = Number(m[2]) }
   }
   return out
+}
+
+// Pull integer from "1/322" string
+function rankFromSlashStr(s) {
+  if (!s) return { rank: null, total: null }
+  const m = String(s).match(/^(\d+)\s*\/\s*(\d+)$/)
+  return m ? { rank: Number(m[1]), total: Number(m[2]) } : { rank: null, total: null }
 }
 
 // Each per-row normalizer returns one record (or null if unparseable)
@@ -166,10 +219,46 @@ const normalizers = {
       citable_items: null,
     }
   },
+  schemaD(row, year) {
+    const issn = normIssn(row['ISSN'])
+    const eissn = normIssn(row['eISSN'])
+    if (!issn && !eissn) return null
+    const yearKey = `${year} JIF`
+    const jciYearKey = `${year} JCI`
+    const jifRank = rankFromSlashStr(row['JIF Rank'])
+    return {
+      year,
+      issn, eissn,
+      name: row['Journal name'] || null,
+      abbr: row['JCR Abbreviation'] || null,
+      jif: toNumOrNull(row[yearKey] ?? row['JIF']),
+      jif_5yr: toNumOrNull(row['5 Year JIF']),
+      jif_no_self: toNumOrNull(row['JIF Without Self Cites']),
+      jci: toNumOrNull(row[jciYearKey] ?? row['JCI']),
+      jcr_quartile: row['JIF Quartile'] || null,
+      jcr_category: row['Category'] || null,
+      jcr_rank: jifRank.rank,
+      jcr_total_in_category: jifRank.total,
+      publisher: row['Publisher'] || null,
+      total_cites: toNumOrNull(row['Total Citations']),
+      total_articles: toNumOrNull(row['Articles']),
+      citable_items: toNumOrNull(row['Citable Items']),
+      // SchemaD richer fields
+      eigenfactor: toNumOrNull(row['Eigenfactor']),
+      normalized_eigenfactor: toNumOrNull(row['Normalized Eigenfactor']),
+      article_influence: toNumOrNull(row['Article Influence Score']),
+      immediacy_index: toNumOrNull(row['Immediacy Index']),
+      jci_percentile: toNumOrNull(row['JCI Percentile']),
+      jif_5yr_quartile: row['5 Year JIF Quartile'] || null,
+      edition: row['Edition'] || null,
+    }
+  },
 }
 
 function detectSchema(headers) {
   const set = new Set(headers.map(h => String(h)))
+  // SchemaD has a year-tagged "YYYY JIF" column + "5 Year JIF" + "Eigenfactor"
+  if ([...set].some(h => /^\d{4}\s+JIF$/.test(h)) && set.has('Eigenfactor')) return 'schemaD'
   if (set.has('Rank') && set.has('JIF Quartile')) return 'schemaB'
   if (set.has('JIF5Years')) return 'schemaA'
   if ([...set].some(h => /^if[_\s]*\d{4}$/i.test(h))) return 'schemaC'
@@ -178,27 +267,45 @@ function detectSchema(headers) {
 }
 
 function parseFile(path) {
-  const year = yearFromFilename(path)
-  if (!year) throw new Error(`Cannot detect year from filename: ${path}`)
   const wb = XLSX.readFile(path)
   const allRecords = []
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
-    const objRows = XLSX.utils.sheet_to_json(sheet, { defval: null, blankrows: false })
+    // Raw 2-d read; we manually pick which row is headers (banner row support).
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: null })
+    if (rawRows.length === 0) continue
+    // schemaD heuristic: R0 mentions "JCR Year:" → headers live at R1
+    const bannerYear = yearFromMetadataRow(rawRows[0])
+    const headerRowIdx = bannerYear ? 1 : 0
+    const headers = rawRows[headerRowIdx]
+    if (!headers || headers.every(c => c == null)) continue
+    // Build object rows by hand so the banner row is properly skipped.
+    const objRows = []
+    for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
+      const row = rawRows[i]
+      if (!row || row.every(c => c == null)) continue
+      const obj = {}
+      for (let j = 0; j < headers.length; j++) obj[String(headers[j])] = row[j] ?? null
+      objRows.push(obj)
+    }
     if (objRows.length === 0) continue
-    const headers = Object.keys(objRows[0])
-    const schemaKey = detectSchema(headers)
-    if (!schemaKey) {
-      console.warn(`  ${path} :: sheet "${sheetName}" — unknown schema, headers=${headers.slice(0, 8).join(',')}`)
+    const detected = detectSchema(headers)
+    const year = bannerYear || yearFromHeaders(headers) || yearFromFilename(path)
+    if (!year) {
+      console.warn(`  ${basename(path)} :: ${sheetName} — cannot detect JCR year`)
       continue
     }
-    const norm = normalizers[schemaKey]
+    if (!detected) {
+      console.warn(`  ${basename(path)} :: ${sheetName} — unknown schema, headers=${headers.slice(0, 8).join(',')}`)
+      continue
+    }
+    const norm = normalizers[detected]
     let n = 0
     for (const row of objRows) {
       const rec = norm(row, year)
       if (rec) { allRecords.push(rec); n++ }
     }
-    console.log(`  ${basename(path)} :: ${sheetName}  schema=${schemaKey}  → ${n} records`)
+    console.log(`  ${basename(path)} :: ${sheetName}  schema=${detected}  year=${year}  → ${n} records`)
   }
   return allRecords
 }
@@ -209,13 +316,20 @@ function main() {
   console.log(`Source dir: ${SOURCE_DIR}`)
   console.log(`Output:     ${OUT_DIR}\n`)
 
-  const files = findJifFiles(SOURCE_DIR)
+  // ALWAYS merge auto-discovered files with explicit CLI paths so a richer
+  // direct-export doesn't wipe out the full-JCR snapshot from the same year.
+  const discovered = findJifFiles(SOURCE_DIR)
+  const cliPaths = process.argv.slice(2).filter(p => p && !p.startsWith('--'))
+  const cliValid = cliPaths.filter(p => existsSync(p) && /\.xlsx$/i.test(p))
+  const files = Array.from(new Set([...discovered, ...cliValid]))
   if (files.length === 0) {
-    console.error(`No JIF_YYYY.xlsx files found under ${SOURCE_DIR}`)
-    console.error(`Set JCR_SOURCE_DIR env var to point elsewhere.`)
+    console.error(`No JCR xlsx files found.`)
+    console.error(`Either pass file paths as args, or place files matching`)
+    console.error(`  JIF_YYYY.xlsx  /  *JCR*JournalResults*.xlsx`)
+    console.error(`under ${SOURCE_DIR} (override via JCR_SOURCE_DIR env).`)
     process.exit(1)
   }
-  console.log(`Found ${files.length} JIF file(s):`)
+  console.log(`Importing ${files.length} JCR file(s):`)
   for (const f of files) console.log(`  ${f}`)
   console.log('')
 
@@ -230,12 +344,27 @@ function main() {
   }
 
   for (const [year, records] of Object.entries(byYear)) {
+    // Dedupe within year by primary key (issn || eissn). When two records
+    // map to the same key, merge them field-by-field: non-null wins.
+    const merged = new Map()
+    for (const r of records) {
+      const key = r.issn || r.eissn || `${r.name || ''}`.toLowerCase()
+      if (!key) continue
+      const cur = merged.get(key)
+      if (!cur) { merged.set(key, { ...r }); continue }
+      for (const [k, v] of Object.entries(r)) {
+        if (v == null || v === '') continue
+        if (cur[k] == null || cur[k] === '') cur[k] = v
+      }
+    }
+    const finalRecords = [...merged.values()]
     const outPath = join(OUT_DIR, `jcr-${year}.jsonl`)
-    const txt = records.map(r => JSON.stringify(r)).join('\n') + '\n'
+    const txt = finalRecords.map(r => JSON.stringify(r)).join('\n') + '\n'
     writeFileSync(outPath, txt)
-    const withIf = records.filter(r => r.jif != null).length
-    const withQuartile = records.filter(r => r.jcr_quartile).length
-    console.log(`✓ ${year}: ${records.length} records (${withIf} with JIF, ${withQuartile} with quartile) → ${outPath}`)
+    const withIf = finalRecords.filter(r => r.jif != null).length
+    const withQuartile = finalRecords.filter(r => r.jcr_quartile).length
+    const withEigenfactor = finalRecords.filter(r => r.eigenfactor != null).length
+    console.log(`✓ ${year}: ${finalRecords.length} unique journals (${withIf} JIF · ${withQuartile} quartile · ${withEigenfactor} eigenfactor) → ${outPath}`)
   }
   console.log('\nDone.')
 }
