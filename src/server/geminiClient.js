@@ -178,7 +178,7 @@ export class GeminiExtractor {
     return { text, raw: data }
   }
 
-  async _callWithRetry(systemText, userText, { attempts = 5, baseDelay = 1500 } = {}) {
+  async _callWithRetry(systemText, userText, { attempts = 3, baseDelay = 2000 } = {}) {
     let lastErr
     for (let i = 0; i < attempts; i++) {
       try {

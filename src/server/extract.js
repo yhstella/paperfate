@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PaperFateExtractor } from './anthropicClient.js'
 import { GeminiExtractor } from './geminiClient.js'
+import { RULE_BY_ITEM_ID } from './ruleExtractors.js'
 
 // Factory: pick provider based on env vars.
 // Priority: explicit opts.provider > GEMINI_API_KEY > ANTHROPIC_API_KEY.
@@ -113,6 +114,109 @@ function pickKeyWeaknesses(scoredItems, q500items, n = 5) {
   return negatives
 }
 
+// ─────────────────── Rule layer (cheap pre-pass) ─────────────────────────────
+//
+// For every hybrid item with a wired rule extractor, run the rule first.
+// If the rule succeeds, score is set deterministically and the LLM is
+// skipped — significant cost saving (~25% of items with current 29-item
+// coverage) and dramatically higher consistency on objective facts.
+//
+// The rule's high-confidence positive result maps to score 4 ("addressed
+// with method") because rule extractors find evidence of presence + method;
+// distinguishing 4 vs 5 (sensitivity analysis / transparency) requires
+// LLM judgment, but score 4 is a reasonable floor.
+//
+function scoreFromRule(item, ruleResult) {
+  if (!ruleResult) return null
+  // Item-specific overrides for cases where the rule output maps cleanly to a
+  // non-default anchor.
+  if (item.id === 'STATS_007') {
+    // exact p-values rubric: 0 absent → 5 exact + magnitude + correction
+    const v = ruleResult.value
+    if (v?.exact_count >= 1 && v?.threshold_only_count === 0) {
+      return { score: 4, rationale: `${v.exact_count} exact p-value(s) reported (vs ${v.threshold_only_count} threshold-only).` }
+    }
+    if (v?.exact_count >= 1) {
+      return { score: 3, rationale: `Mix of exact (${v.exact_count}) and threshold-only (${v.threshold_only_count}) p-values.` }
+    }
+    return { score: 1, rationale: 'Only threshold-style p<0.05 reported.' }
+  }
+  if (item.id === 'AIPRED_015') {
+    // AUROC value gives more info
+    const v = ruleResult.value
+    if (typeof v === 'number') {
+      return { score: 4, rationale: `Discrimination metric reported (≈${v}).` }
+    }
+    return { score: 3, rationale: 'Discrimination metric mentioned.' }
+  }
+  if (item.id === 'DESIGN_003' || item.id === 'REPRT_004') {
+    // Registry ID found
+    const v = ruleResult.value
+    if (v?.id) {
+      return { score: 3, rationale: `${v.registry} ID provided (${v.id}).` }
+    }
+  }
+  if (item.id === 'DESIGN_011' || item.id === 'DESIGN_012') {
+    const v = ruleResult.value
+    if (v?.count >= 3) {
+      return { score: 4, rationale: `Multicenter (${v.count} centers).` }
+    }
+    if (v?.multicenter) {
+      return { score: 3, rationale: 'Multicenter design stated.' }
+    }
+  }
+  if (item.id === 'REPRT_001') {
+    const v = ruleResult.value
+    if (Array.isArray(v) && v.length >= 1) {
+      return { score: 3, rationale: `Reporting guideline(s) mentioned: ${v.join(', ')}.` }
+    }
+  }
+  // Default: presence of a verifiable signal → score 4 (addressed with method)
+  return { score: 4, rationale: 'Rule-extracted signal present in manuscript.' }
+}
+
+function runRulePrePass(items, manuscript) {
+  const ruleResults = {}        // itemId → scored output (or null if skipped/no signal)
+  const remainingItems = []      // items still needing LLM
+  for (const item of items) {
+    if (item.mode !== 'hybrid' && item.mode !== 'rule') {
+      remainingItems.push(item)
+      continue
+    }
+    const extractor = RULE_BY_ITEM_ID[item.id]
+    if (!extractor) {
+      remainingItems.push(item)
+      continue
+    }
+    let r = null
+    try { r = extractor(manuscript) } catch (e) {
+      remainingItems.push(item)
+      continue
+    }
+    if (!r) {
+      // No signal found by rule — fall through to LLM
+      remainingItems.push(item)
+      continue
+    }
+    const mapping = scoreFromRule(item, r)
+    if (!mapping) {
+      remainingItems.push(item)
+      continue
+    }
+    ruleResults[item.id] = {
+      id:               item.id,
+      score:            mapping.score,
+      applicability:    'applicable',
+      confidence:       r.confidence ?? 0.85,
+      evidence_text:    r.evidence_text || '',
+      evidence_section: r.evidence_section || '',
+      rationale_short:  mapping.rationale,
+      scoring_mode:     'rule',
+    }
+  }
+  return { ruleResults, remainingItems }
+}
+
 /**
  * forecastManuscript — top-level entry the server endpoint calls.
  *
@@ -123,6 +227,7 @@ function pickKeyWeaknesses(scoredItems, q500items, n = 5) {
  *   - concurrency: parallel item calls (default 10)
  *   - onProgress: (done, total) => void
  *   - extractor: PaperFateExtractor instance (else one is constructed from env)
+ *   - skipRulePrePass: if true, send all items to LLM (default false)
  * @returns {Promise<Object>}
  */
 export async function forecastManuscript(manuscript, articleType = '*', opts = {}) {
@@ -138,23 +243,35 @@ export async function forecastManuscript(manuscript, articleType = '*', opts = {
     q100Only,
   })
 
+  // STEP 1 — Rule pre-pass (free, ~ms)
+  const { ruleResults, remainingItems } = opts.skipRulePrePass
+    ? { ruleResults: {}, remainingItems: items }
+    : runRulePrePass(items, manuscript)
+
+  // STEP 2 — LLM scoring on what's left
   const extractor = opts.extractor || createExtractor(opts)
   const startedAt = Date.now()
-  const scored = await extractor.batchScore(items, manuscript, articleType, {
+  const llmScored = await extractor.batchScore(remainingItems, manuscript, articleType, {
     concurrency: opts.concurrency || 10,
-    onItem: (_res, idx) => opts.onProgress?.(idx + 1, items.length),
+    onItem: (_res, idx) => opts.onProgress?.(idx + 1 + Object.keys(ruleResults).length, items.length),
   })
   const elapsedMs = Date.now() - startedAt
+
+  // Merge in original item order
+  const llmById = new Map(llmScored.map((s, i) => [remainingItems[i].id, s]))
+  const scored = items.map(it => ruleResults[it.id] || llmById.get(it.id))
 
   const domains = Object.keys(q500.domains)
   const domainRollup = domains.map(d => rollupDomain(scored, d))
   const overall = overallScore(domainRollup)
 
+  const ruleHits = Object.keys(ruleResults).length
+  const llmCalls = remainingItems.length
   return {
     mode,
     article_type: articleType,
     items_attempted: items.length,
-    items_scored: scored.filter(s => !s._error).length,
+    items_scored: scored.filter(s => s && !s._error).length,
     overall_score: overall,
     domain_rollup: domainRollup,
     strongest_domains: pickStrongest(domainRollup, 3),
@@ -162,6 +279,11 @@ export async function forecastManuscript(manuscript, articleType = '*', opts = {
     key_weaknesses: pickKeyWeaknesses(scored, q500.items, 5),
     items: scored,
     elapsed_ms: elapsedMs,
+    pipeline: {
+      rule_pre_pass_hits: ruleHits,
+      llm_items: llmCalls,
+      llm_cost_savings_pct: items.length ? +(ruleHits / items.length * 100).toFixed(1) : 0,
+    },
     cost: extractor.costSummary(),
     rubric_version: q500.version,
   }

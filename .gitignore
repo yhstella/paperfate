@@ -6,7 +6,8 @@ dist
 .DS_Store
 *.log
 
-# Collected research data (kept local, often large)
-data/pubmed/
-data/openalex/
-data/cache/
+# Collected research data + SQLite DB (kept local, often large; will move to SSD)
+data/
+*.db
+*.db-shm
+*.db-wal

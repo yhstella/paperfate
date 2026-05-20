@@ -92,3 +92,11 @@
 **Next**: Session 6 — A1.5 (api/forecast.js endpoint), A2.1 (ruleExtractors.js core 10 functions), check B1 progress, write collect-openalex.mjs (B2)
 **Files changed**: 3 (extract.js, test-extract.mjs, this log)
 **Cost so far**: $0 (still no Anthropic calls — would need API key in env to test live)
+
+## STOPPED — user response (2026-05-20 ~07:57)
+
+Stop condition triggered: 사용자가 "지금까지 진행상황과 앞으로의 계획을 보고해"라는 메시지로 응답.
+- 다음 wake-up (04:52 예약된 것)은 fire되었지만 정상 처리됨
+- 이 entry 이후 ScheduleWakeup 호출 안 함
+- B1 PubMed background 작업은 별개 프로세스라 계속 실행 중 (8/8 method seed 중 method_rct_landmark 진행 중)
+- 사용자가 "resume" 같은 지시 시 다시 시작

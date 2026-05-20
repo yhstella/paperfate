@@ -103,7 +103,10 @@ export default function Simulator() {
       mode: inputMode === 'full' ? 'Q500' : 'Q100',
     }
     try {
-      const r = await forecast(input, { useMock: true, fallbackMock: true })
+      // Production: hit /api/forecast (server-side Gemini scoring).
+      // Local dev (Vite preview has no /api): falls back to local mock engine
+      // so the demo still works while you iterate on the UI.
+      const r = await forecast(input, { fallbackMock: true })
       setResult(r)
       setStatus('done')
       setTimeout(() => {
@@ -195,6 +198,11 @@ export default function Simulator() {
         {status === 'running' && <SkeletonResult />}
         {status === 'done' && result && (
           <div className="space-y-6">
+            {result.mock_fallback_reason && (
+              <div className="rounded-lg border border-amber-400/30 bg-amber-400/[0.06] p-3 text-xs text-amber-200/90">
+                ⓘ Live forecast endpoint unavailable; showing the local mock engine instead. <span className="text-amber-200/60">{result.mock_fallback_reason}</span>
+              </div>
+            )}
             <ResultPanel result={resultLegacyShape(result)} input={{ title, abstract: text }} />
             {result.domain_rollup?.length > 0 && (
               <div className="card p-6 animate-fade-up">
@@ -202,9 +210,11 @@ export default function Simulator() {
                   rollup={result.domain_rollup}
                   keyWeaknesses={result.key_weaknesses}
                 />
-                {result.mock_fallback_reason && (
+                {result.pipeline && (
                   <div className="mt-4 text-[11px] text-slate-500">
-                    ⓘ Server unavailable, showing local mock result. Reason: <code className="text-slate-400">{result.mock_fallback_reason}</code>
+                    Rule pre-pass: {result.pipeline.rule_pre_pass_hits} items / LLM: {result.pipeline.llm_items} items
+                    {result.pipeline.llm_cost_savings_pct > 0 && ` (${result.pipeline.llm_cost_savings_pct}% LLM cost saved)`}
+                    {result.cost?.total_usd != null && ` · cost $${result.cost.total_usd}`}
                   </div>
                 )}
               </div>
