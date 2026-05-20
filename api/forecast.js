@@ -76,8 +76,8 @@ export default async function handler(req, res) {
   if (!abstract || typeof abstract !== 'string' || abstract.trim().length < 200)
     return bad(res, 400, 'missing_or_short_abstract', 'abstract must be ≥200 chars')
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return bad(res, 500, 'anthropic_api_key_missing', 'Server is misconfigured. Contact admin.')
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
+    return bad(res, 500, 'llm_api_key_missing', 'No LLM provider configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.')
   }
 
   const manuscript = {

@@ -7,6 +7,25 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PaperFateExtractor } from './anthropicClient.js'
+import { GeminiExtractor } from './geminiClient.js'
+
+// Factory: pick provider based on env vars.
+// Priority: explicit opts.provider > GEMINI_API_KEY > ANTHROPIC_API_KEY.
+// LLM_PROVIDER env can override ('gemini' | 'anthropic').
+export function createExtractor(opts = {}) {
+  const explicit = opts.provider || process.env.LLM_PROVIDER
+  if (explicit === 'gemini')    return new GeminiExtractor(opts.geminiOpts || {})
+  if (explicit === 'anthropic') return new PaperFateExtractor(opts.anthropicOpts || {})
+  if (process.env.GEMINI_API_KEY)    return new GeminiExtractor(opts.geminiOpts || {})
+  if (process.env.ANTHROPIC_API_KEY) return new PaperFateExtractor(opts.anthropicOpts || {})
+  throw new Error('No LLM key set. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.')
+}
+
+// filterItems shared between providers — both have a static method but they
+// implement the same logic; expose a stable name here for callers.
+export function filterItems(items, opts) {
+  return PaperFateExtractor.filterItems(items, opts)
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const RUBRIC_ROOT = join(HERE, '..', '..', 'docs', 'rubric')
@@ -113,13 +132,13 @@ export async function forecastManuscript(manuscript, articleType = '*', opts = {
   const lvlMax = mode === 'Q500' ? 4 : 1
   const q100Only = mode === 'Q100'
 
-  const items = PaperFateExtractor.filterItems(q500.items, {
+  const items = filterItems(q500.items, {
     lvlMax,
     articleType,
     q100Only,
   })
 
-  const extractor = opts.extractor || new PaperFateExtractor()
+  const extractor = opts.extractor || createExtractor(opts)
   const startedAt = Date.now()
   const scored = await extractor.batchScore(items, manuscript, articleType, {
     concurrency: opts.concurrency || 10,

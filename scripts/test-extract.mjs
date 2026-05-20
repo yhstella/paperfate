@@ -11,8 +11,7 @@
 //   ANTHROPIC_API_KEY=sk-... node scripts/test-extract.mjs --q100        # full Q100 run
 //   ANTHROPIC_API_KEY=sk-... node scripts/test-extract.mjs --items 3     # first 3 items only
 
-import { loadQ500, forecastManuscript } from '../src/server/extract.js'
-import { PaperFateExtractor } from '../src/server/anthropicClient.js'
+import { loadQ500, forecastManuscript, createExtractor, filterItems } from '../src/server/extract.js'
 import { buildItemPrompt, getSystemPrompt } from '../src/server/extractionPrompt.js'
 
 // Sample manuscript — Empagliflozin CKD trial (matches the simulator's loaded sample).
@@ -45,7 +44,7 @@ async function main() {
   const q500 = loadQ500()
 
   // Filter to Q100 + RCT-applicable + lvl=1
-  const applicable = PaperFateExtractor.filterItems(q500.items, {
+  const applicable = filterItems(q500.items, {
     lvlMax: 1,
     articleType: ARTICLE_TYPE,
     q100Only: args.q100 || !args.fullSet,
@@ -73,17 +72,18 @@ async function main() {
     return
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('ERROR: ANTHROPIC_API_KEY is not set.')
-    console.error('Either set it or run with --dry-run to inspect prompts without calling the API.')
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
+    console.error('ERROR: neither ANTHROPIC_API_KEY nor GEMINI_API_KEY is set.')
+    console.error('Either set one of them or run with --dry-run to inspect prompts without calling any API.')
     process.exit(1)
   }
 
   const limit = args.items > 0 ? args.items : applicable.length
   const subset = applicable.slice(0, limit)
-  console.log(`Calling Anthropic on ${subset.length} items …\n`)
-
-  const extractor = new PaperFateExtractor()
+  const extractor = createExtractor()
+  const provider = process.env.LLM_PROVIDER
+    || (process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic')
+  console.log(`Calling ${provider.toUpperCase()} on ${subset.length} items …\n`)
   let lastPrintedAt = 0
   const startedAt = Date.now()
 
