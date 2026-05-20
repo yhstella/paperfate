@@ -5,6 +5,11 @@ const ITEMS = [
     icon: 'tier',
   },
   {
+    title: 'Recommended submission journey',
+    body: 'An ordered sequence of journals to try — optimized so each successive target shares formatting, reference style, and reporting checklists with the previous, minimizing rework if a submission gets rejected.',
+    icon: 'journey',
+  },
+  {
     title: 'Desk-reject risk',
     body: 'Probability that an editor sends it back without external review — modeled from scope, novelty, and venue history.',
     icon: 'flag',
@@ -37,7 +42,7 @@ export default function Features() {
       <div className="max-w-2xl">
         <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">What PaperFate predicts</h2>
         <p className="mt-3 text-slate-400">
-          Six forecasts, grounded in similarity search against published biomedical literature
+          Seven forecasts, grounded in similarity search against published biomedical literature
           and field-normalized citation patterns. Probabilistic — never absolute.
         </p>
       </div>
@@ -60,6 +65,7 @@ function Icon({ name }) {
   const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
   switch (name) {
     case 'tier': return <svg {...common}><path d="M4 20h16M6 16h4M14 12h4M10 8h4"/></svg>
+    case 'journey': return <svg {...common}><path d="M4 17h4l3-10 3 7 2-4h4"/><circle cx="4" cy="17" r="1.5"/><circle cx="20" cy="10" r="1.5"/></svg>
     case 'flag': return <svg {...common}><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></svg>
     case 'clock': return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     case 'cite': return <svg {...common}><path d="M7 7h4v4H7zM13 7h4v4h-4z"/><path d="M9 11c0 3-2 5-2 5M15 11c0 3-2 5-2 5"/></svg>
