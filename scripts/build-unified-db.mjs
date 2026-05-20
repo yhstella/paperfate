@@ -101,6 +101,68 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
   started_at        TEXT,
   finished_at       TEXT
 );
+
+-- One row per journal/venue (OpenAlex Sources + Scimago overlay).
+CREATE TABLE IF NOT EXISTS journals (
+  openalex_id              TEXT PRIMARY KEY,
+  issn_l                   TEXT,
+  issn_json                TEXT,
+  display_name             TEXT,
+  alternate_titles_json    TEXT,
+  type                     TEXT,
+  country_code             TEXT,
+  host_organization        TEXT,
+  host_organization_name   TEXT,
+  homepage_url             TEXT,
+  works_count              INTEGER,
+  cited_by_count           INTEGER,
+  first_publication_year   INTEGER,
+  last_publication_year    INTEGER,
+  is_oa                    INTEGER,
+  is_in_doaj               INTEGER,
+  is_core                  INTEGER,
+  apc_usd                  REAL,
+  h_index                  INTEGER,
+  i10_index                INTEGER,
+  two_yr_mean_citedness    REAL,        -- snapshot IF proxy (current)
+  topics_json              TEXT,         -- top OpenAlex topics for venue
+  fetched_at               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_journals_issn  ON journals(issn_l);
+CREATE INDEX IF NOT EXISTS idx_journals_name  ON journals(display_name);
+CREATE INDEX IF NOT EXISTS idx_journals_ifproxy ON journals(two_yr_mean_citedness);
+
+-- One row per (journal × year) — supports tracking IF-proxy drift, SJR moves,
+-- quartile changes, etc. Source records (oa = OpenAlex 2yr_mean_citedness,
+-- sjr = Scimago Journal Rank) live side-by-side.
+CREATE TABLE IF NOT EXISTS journal_year_metrics (
+  openalex_id            TEXT,
+  issn                   TEXT,
+  year                   INTEGER,
+  -- From OpenAlex counts_by_year + derived IF proxy
+  works_count            INTEGER,
+  cited_by_count         INTEGER,
+  if_proxy_openalex      REAL,         -- our derived: cite[Y] / (works[Y-1]+works[Y-2])
+  -- From Scimago for that year
+  scimago_id             TEXT,
+  sjr                    REAL,
+  sjr_quartile           TEXT,
+  scimago_h_index        INTEGER,
+  total_docs_year        INTEGER,
+  total_docs_3y          INTEGER,
+  total_cites_3y         INTEGER,
+  citable_docs_3y        INTEGER,
+  cites_per_doc_2y       REAL,
+  scimago_country        TEXT,
+  scimago_publisher      TEXT,
+  scimago_categories     TEXT,
+  scimago_areas          TEXT,
+  ingested_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (openalex_id, year)
+);
+CREATE INDEX IF NOT EXISTS idx_jym_year ON journal_year_metrics(year);
+CREATE INDEX IF NOT EXISTS idx_jym_issn ON journal_year_metrics(issn);
+CREATE INDEX IF NOT EXISTS idx_jym_sjr  ON journal_year_metrics(sjr);
 `
 
 function openDb() {
@@ -381,6 +443,181 @@ function ingestCrossref(db) {
   }
 }
 
+// ────────────────── OpenAlex Sources (journals) ingestion ──────────────────
+function ingestOpenAlexSources(db) {
+  const files = listJsonl('openalex-sources')
+  if (files.length === 0) { console.log('OpenAlex Sources: no files.'); return }
+  const upJournal = db.prepare(`
+    INSERT INTO journals (
+      openalex_id, issn_l, issn_json, display_name, alternate_titles_json,
+      type, country_code, host_organization, host_organization_name, homepage_url,
+      works_count, cited_by_count, first_publication_year, last_publication_year,
+      is_oa, is_in_doaj, is_core, apc_usd,
+      h_index, i10_index, two_yr_mean_citedness, topics_json, fetched_at
+    ) VALUES (
+      @openalex_id, @issn_l, @issn_json, @display_name, @alternate_titles_json,
+      @type, @country_code, @host_organization, @host_organization_name, @homepage_url,
+      @works_count, @cited_by_count, @first_publication_year, @last_publication_year,
+      @is_oa, @is_in_doaj, @is_core, @apc_usd,
+      @h_index, @i10_index, @two_yr_mean_citedness, @topics_json, @fetched_at
+    )
+    ON CONFLICT(openalex_id) DO UPDATE SET
+      issn_l = excluded.issn_l, issn_json = excluded.issn_json,
+      display_name = excluded.display_name, alternate_titles_json = excluded.alternate_titles_json,
+      type = excluded.type, country_code = excluded.country_code,
+      host_organization = excluded.host_organization,
+      host_organization_name = excluded.host_organization_name,
+      homepage_url = excluded.homepage_url,
+      works_count = excluded.works_count, cited_by_count = excluded.cited_by_count,
+      first_publication_year = excluded.first_publication_year,
+      last_publication_year = excluded.last_publication_year,
+      is_oa = excluded.is_oa, is_in_doaj = excluded.is_in_doaj, is_core = excluded.is_core,
+      apc_usd = excluded.apc_usd,
+      h_index = excluded.h_index, i10_index = excluded.i10_index,
+      two_yr_mean_citedness = excluded.two_yr_mean_citedness,
+      topics_json = excluded.topics_json,
+      fetched_at = excluded.fetched_at
+  `)
+  const upYear = db.prepare(`
+    INSERT INTO journal_year_metrics (
+      openalex_id, issn, year, works_count, cited_by_count, if_proxy_openalex
+    ) VALUES (@openalex_id, @issn, @year, @works_count, @cited_by_count, @if_proxy_openalex)
+    ON CONFLICT(openalex_id, year) DO UPDATE SET
+      works_count       = excluded.works_count,
+      cited_by_count    = excluded.cited_by_count,
+      if_proxy_openalex = excluded.if_proxy_openalex,
+      issn              = COALESCE(excluded.issn, issn)
+  `)
+  for (const f of files) {
+    const startedAt = new Date().toISOString()
+    let seen = 0, up = 0, yearRows = 0
+    db.transaction(() => {
+      for (const rec of readJsonl(f)) {
+        seen++
+        if (!rec.openalex_id) continue
+        upJournal.run({
+          openalex_id:           rec.openalex_id,
+          issn_l:                rec.issn_l || null,
+          issn_json:             JSON.stringify(rec.issn || []),
+          display_name:          rec.display_name || null,
+          alternate_titles_json: JSON.stringify(rec.alternate_titles || []),
+          type:                  rec.type || null,
+          country_code:          rec.country_code || null,
+          host_organization:     rec.host_organization || null,
+          host_organization_name:rec.host_organization_name || null,
+          homepage_url:          rec.homepage_url || null,
+          works_count:           rec.works_count ?? null,
+          cited_by_count:        rec.cited_by_count ?? null,
+          first_publication_year:rec.first_publication_year ?? null,
+          last_publication_year: rec.last_publication_year ?? null,
+          is_oa:                 rec.is_oa ? 1 : 0,
+          is_in_doaj:            rec.is_in_doaj ? 1 : 0,
+          is_core:               rec.is_core ? 1 : 0,
+          apc_usd:               rec.apc_usd ?? null,
+          h_index:               rec.h_index ?? null,
+          i10_index:             rec.i10_index ?? null,
+          two_yr_mean_citedness: rec.two_yr_mean_citedness ?? null,
+          topics_json:           JSON.stringify(rec.topics || []),
+          fetched_at:            rec.fetched_at || startedAt,
+        })
+        up++
+        for (const y of (rec.yearly_if_proxy || [])) {
+          upYear.run({
+            openalex_id:       rec.openalex_id,
+            issn:              rec.issn_l || (rec.issn?.[0] ?? null),
+            year:              y.year,
+            works_count:       y.works ?? null,
+            cited_by_count:    y.cited_by ?? null,
+            if_proxy_openalex: y.if_proxy ?? null,
+          })
+          yearRows++
+        }
+      }
+    })()
+    logRun(db, 'openalex-sources', f, seen, up, startedAt)
+    console.log(`  openalex-sources: ${f.split(/[\\/]/).pop()}  seen=${seen} journals=${up} year_rows=${yearRows}`)
+  }
+}
+
+// ────────────────── Scimago ingestion (per-year SJR + quartile) ─────────────
+function ingestScimago(db) {
+  const files = listJsonl('scimago')
+  if (files.length === 0) { console.log('Scimago: no files.'); return }
+  // Build ISSN→openalex_id map for join
+  const issnToOa = new Map()
+  for (const row of db.prepare('SELECT openalex_id, issn_l, issn_json FROM journals').all()) {
+    if (row.issn_l) issnToOa.set(row.issn_l, row.openalex_id)
+    try {
+      for (const i of JSON.parse(row.issn_json || '[]')) issnToOa.set(i, row.openalex_id)
+    } catch {}
+  }
+  console.log(`  Scimago ISSN→openalex_id map: ${issnToOa.size}`)
+  const upd = db.prepare(`
+    INSERT INTO journal_year_metrics (
+      openalex_id, issn, year,
+      scimago_id, sjr, sjr_quartile, scimago_h_index,
+      total_docs_year, total_docs_3y, total_cites_3y, citable_docs_3y,
+      cites_per_doc_2y, scimago_country, scimago_publisher,
+      scimago_categories, scimago_areas
+    ) VALUES (
+      @openalex_id, @issn, @year,
+      @scimago_id, @sjr, @sjr_quartile, @scimago_h_index,
+      @total_docs_year, @total_docs_3y, @total_cites_3y, @citable_docs_3y,
+      @cites_per_doc_2y, @scimago_country, @scimago_publisher,
+      @scimago_categories, @scimago_areas
+    )
+    ON CONFLICT(openalex_id, year) DO UPDATE SET
+      scimago_id        = excluded.scimago_id,
+      sjr               = excluded.sjr,
+      sjr_quartile      = excluded.sjr_quartile,
+      scimago_h_index   = excluded.scimago_h_index,
+      total_docs_year   = excluded.total_docs_year,
+      total_docs_3y     = excluded.total_docs_3y,
+      total_cites_3y    = excluded.total_cites_3y,
+      citable_docs_3y   = excluded.citable_docs_3y,
+      cites_per_doc_2y  = excluded.cites_per_doc_2y,
+      scimago_country   = excluded.scimago_country,
+      scimago_publisher = excluded.scimago_publisher,
+      scimago_categories= excluded.scimago_categories,
+      scimago_areas     = excluded.scimago_areas,
+      issn              = COALESCE(excluded.issn, issn)
+  `)
+  for (const f of files) {
+    const startedAt = new Date().toISOString()
+    let seen = 0, matched = 0, unmatched = 0
+    db.transaction(() => {
+      for (const rec of readJsonl(f)) {
+        seen++
+        const issns = rec.issns || []
+        let oa = null
+        for (const i of issns) if (issnToOa.has(i)) { oa = issnToOa.get(i); break }
+        if (!oa) { unmatched++; continue }
+        upd.run({
+          openalex_id:       oa,
+          issn:              issns[0] || null,
+          year:              rec.year,
+          scimago_id:        rec.scimago_id || null,
+          sjr:               rec.sjr ?? null,
+          sjr_quartile:      rec.sjr_quartile || null,
+          scimago_h_index:   rec.h_index ?? null,
+          total_docs_year:   rec.total_docs_year ?? null,
+          total_docs_3y:     rec.total_docs_3y ?? null,
+          total_cites_3y:    rec.total_cites_3y ?? null,
+          citable_docs_3y:   rec.citable_docs_3y ?? null,
+          cites_per_doc_2y:  rec.cites_per_doc_2y ?? null,
+          scimago_country:   rec.country || null,
+          scimago_publisher: rec.publisher || null,
+          scimago_categories:rec.categories || null,
+          scimago_areas:     rec.areas || null,
+        })
+        matched++
+      }
+    })()
+    logRun(db, 'scimago', f, seen, matched, startedAt)
+    console.log(`  scimago: ${f.split(/[\\/]/).pop()}  seen=${seen} matched=${matched} unmatched=${unmatched}`)
+  }
+}
+
 function summary(db) {
   const row = db.prepare(`
     SELECT
@@ -393,8 +630,18 @@ function summary(db) {
       ROUND(AVG(citations_openalex), 1) AS avg_oa_citations
     FROM papers
   `).get()
-  console.log('\n── DB summary ──')
+  const jrow = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM journals)                  AS journals,
+      (SELECT COUNT(*) FROM journal_year_metrics)      AS journal_year_rows,
+      (SELECT COUNT(DISTINCT year) FROM journal_year_metrics) AS years_covered,
+      (SELECT COUNT(*) FROM journal_year_metrics WHERE sjr IS NOT NULL) AS scimago_rows,
+      (SELECT ROUND(AVG(two_yr_mean_citedness), 2) FROM journals WHERE two_yr_mean_citedness IS NOT NULL) AS avg_if_proxy
+  `).get()
+  console.log('\n── DB summary (papers) ──')
   for (const [k, v] of Object.entries(row)) console.log(`  ${k.padEnd(24)} ${v}`)
+  console.log('\n── DB summary (journals) ──')
+  for (const [k, v] of Object.entries(jrow)) console.log(`  ${k.padEnd(24)} ${v}`)
   console.log(`  DB file size              ${(statSync(DB_PATH).size / 1024 / 1024).toFixed(1)} MB`)
 }
 
@@ -414,6 +661,10 @@ async function main() {
   ingestS2(db)
   console.log('── ingesting Crossref ──')
   ingestCrossref(db)
+  console.log('── ingesting OpenAlex Sources (journals) ──')
+  ingestOpenAlexSources(db)
+  console.log('── ingesting Scimago ──')
+  ingestScimago(db)
 
   summary(db)
   console.log(`\nTotal elapsed: ${((Date.now() - started) / 1000).toFixed(1)}s`)

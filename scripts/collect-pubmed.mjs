@@ -214,25 +214,32 @@ async function efetchBatch(pmids, limiter) {
 }
 
 async function collectSeed(key, query, opts) {
-  const { retmax = 2000 } = opts
+  const { retmax = 2000, yearLow = null, yearHigh = null } = opts
   const limiter = new Limiter(REQ_PER_SEC)
 
+  // Append year filter if buckets are configured.
+  const effectiveQuery = (yearLow && yearHigh)
+    ? `(${query}) AND ("${yearLow}/01/01"[Date - Publication] : "${yearHigh}/12/31"[Date - Publication])`
+    : query
+  const bucketSuffix = (yearLow && yearHigh) ? `-${yearLow}-${yearHigh}` : ''
+
   mkdirSync(OUT_DIR, { recursive: true })
-  const outPath = join(OUT_DIR, `${key}-${todayStamp()}.jsonl`)
+  const outPath = join(OUT_DIR, `${key}${bucketSuffix}-${todayStamp()}.jsonl`)
   if (existsSync(outPath)) {
-    console.log(`▷ ${key}: rerun → overwriting ${outPath}`)
+    console.log(`▷ ${key}${bucketSuffix}: file exists, skipping (delete to refresh)`)
+    return { key, written: 0, path: outPath, skipped: true }
   }
   const stream = createWriteStream(outPath, { flags: 'w' })
 
   // 1) page through esearch to gather PMIDs
-  console.log(`▶ ${key}`)
-  console.log(`  query: ${query}`)
+  console.log(`▶ ${key}${bucketSuffix}`)
+  console.log(`  query: ${effectiveQuery}`)
   const allIds = []
   let cursor = 0
   let total = Infinity
   const page = Math.min(1000, retmax)
   while (cursor < retmax && cursor < total) {
-    const { ids, total: t } = await esearchPMIDs(query, Math.min(page, retmax - cursor), cursor, limiter)
+    const { ids, total: t } = await esearchPMIDs(effectiveQuery, Math.min(page, retmax - cursor), cursor, limiter)
     if (t < total) total = t
     if (ids.length === 0) break
     allIds.push(...ids)
@@ -282,13 +289,24 @@ async function main() {
 
   const summary = []
   const startedAt = Date.now()
+  const buckets = seedsCfg._yearBuckets && seedsCfg._yearBuckets.length
+    ? seedsCfg._yearBuckets
+    : [[null, null]]
+  console.log(`Year buckets : ${buckets.map(b => b[0] ? `${b[0]}-${b[1]}` : 'none').join(', ')}`)
+  console.log('')
+
   for (const [key, query] of entries) {
-    try {
-      const r = await collectSeed(key, query, { retmax: seedsCfg._retmaxPerSeed || 2000 })
-      summary.push(r)
-    } catch (e) {
-      console.error(`✗ ${key} failed:`, e.message)
-      summary.push({ key, error: e.message })
+    for (const [yearLow, yearHigh] of buckets) {
+      try {
+        const r = await collectSeed(key, query, {
+          retmax: seedsCfg._retmaxPerSeed || 2000,
+          yearLow, yearHigh,
+        })
+        summary.push(r)
+      } catch (e) {
+        console.error(`✗ ${key} ${yearLow ?? ''}-${yearHigh ?? ''} failed:`, e.message)
+        summary.push({ key, error: e.message })
+      }
     }
   }
 

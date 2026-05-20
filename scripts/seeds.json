@@ -1,7 +1,7 @@
 {
-  "_comment": "PubMed seed queries for PaperFate corpus. Balanced across 22 specialties + 8 methodologies. Each entry queried separately and saved to data/pubmed/<key>-<YYYY-MM-DD>.jsonl. Tune freely. Run `npm run collect <key1> <key2>` to do a subset.",
-  "_dateRange": "2018:2025",
-  "_retmaxPerSeed": 2000,
+  "_comment": "PubMed seed queries for PaperFate corpus. Balanced across 22 specialties + 8 methodologies. Each entry × each year bucket → saved to data/pubmed/<key>-<yearLow>-<yearHigh>-<YYYY-MM-DD>.jsonl. Tune freely. Run `npm run collect <key1> <key2>` to do a subset.",
+  "_retmaxPerSeed": 3000,
+  "_yearBuckets": [[2010, 2014], [2015, 2019], [2020, 2025]],
   "seeds": {
     "oncology_solid":          "(non-small cell lung cancer[Title/Abstract] OR breast cancer[Title/Abstract] OR colorectal cancer[Title/Abstract] OR melanoma[Title/Abstract]) AND (treatment[Title/Abstract] OR therapy[Title/Abstract] OR outcomes[Title/Abstract])",
     "oncology_immuno":         "(immune checkpoint inhibitor[Title/Abstract] OR pembrolizumab[Title/Abstract] OR nivolumab[Title/Abstract] OR CAR-T[Title/Abstract]) AND (clinical trial[Publication Type] OR cohort[Title/Abstract])",
