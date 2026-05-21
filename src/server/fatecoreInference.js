@@ -179,8 +179,22 @@ function countAuthors(manuscript) {
   return NaN
 }
 
+function firstFinite(...values) {
+  for (const value of values) {
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return NaN
+}
+
 export function buildFeatureVector(manuscript, extraction, model, opts = {}) {
   const targetJournal = opts.targetJournal || {}
+  const authorFeatures =
+    opts.authorFeatures ||
+    opts.author_features ||
+    manuscript?.authorFeatures ||
+    manuscript?.author_features ||
+    {}
   const itemMap = new Map(extractionItems(extraction).map(item => [item.id, item]))
   const year = Number(opts.year || manuscript?.year || new Date().getFullYear())
   const nowYear = new Date().getFullYear()
@@ -196,12 +210,12 @@ export function buildFeatureVector(manuscript, extraction, model, opts = {}) {
     publication_types_count: NaN,
     mesh_terms_count: NaN,
     is_preprint: manuscript?.is_preprint ? 1 : 0,
-    first_author_h_index: targetJournal.first_author_h_index ?? NaN,
-    last_author_h_index: targetJournal.last_author_h_index ?? NaN,
-    max_team_h_index: targetJournal.max_team_h_index ?? NaN,
-    median_team_h_index: targetJournal.median_team_h_index ?? NaN,
-    team_size_with_id: targetJournal.team_size_with_id ?? NaN,
-    international_collab: targetJournal.international_collab ?? NaN,
+    first_author_h_index: firstFinite(manuscript?.first_author_h_index, authorFeatures.first_author_h_index),
+    last_author_h_index: firstFinite(manuscript?.last_author_h_index, authorFeatures.last_author_h_index),
+    max_team_h_index: firstFinite(manuscript?.max_team_h_index, authorFeatures.max_team_h_index),
+    median_team_h_index: firstFinite(manuscript?.median_team_h_index, authorFeatures.median_team_h_index),
+    team_size_with_id: firstFinite(manuscript?.team_size_with_id, authorFeatures.team_size_with_id),
+    international_collab: firstFinite(manuscript?.international_collab, authorFeatures.international_collab),
     j_h_index: targetJournal.h_index ?? targetJournal.j_h_index ?? NaN,
     j_i10_index: targetJournal.i10_index ?? targetJournal.j_i10_index ?? NaN,
     j_two_yr_mean_citedness: targetJournal.two_yr_mean_citedness ?? targetJournal.j_two_yr_mean_citedness ?? NaN,
@@ -303,11 +317,14 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
     ? clamp((extraction.items_scored || 0) / extraction.items_attempted, 0.2, 1)
     : 0.6
 
+  const journey = generateJourney(predictions.jcr_jif, manuscript, extraction)
+
   return {
     predictions,
     domain_scores: domain,
     weakness: extraction?.key_weaknesses || extraction?.weakest_domains || [],
     similar_papers: [],
+    journey,
     confidence: +clamp((modelTargets ? 0.72 : 0.45) + 0.18 * extractionConfidence + 0.08 * q, 0, 0.95).toFixed(3),
     cost_usd: Number(extraction?.cost?.total_usd ?? extraction?.cost_usd ?? 0),
     fatecore: {
@@ -320,4 +337,128 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
   }
 }
 
-export { parseLightGbmModel, predictLightGbm, interpolateIso }
+// ─── Journey generator ────────────────────────────────────────────────────
+let _journals = null
+function loadJournals() {
+  if (_journals) return _journals
+  const p = join(DEFAULT_WEIGHTS_DIR, 'journals-shortlist.json')
+  if (!existsSync(p)) { _journals = []; return _journals }
+  try {
+    const data = JSON.parse(readFileSync(p, 'utf-8'))
+    _journals = data.journals || []
+  } catch { _journals = [] }
+  return _journals
+}
+
+// Heuristic field detection from manuscript keywords + MeSH
+function detectFields(manuscript, extraction) {
+  const text = `${manuscript?.title || ''} ${manuscript?.abstract || ''}`.toLowerCase()
+  const mesh = (manuscript?.mesh_terms || []).map(m => (typeof m === 'string' ? m : m.descriptor || '').toLowerCase())
+  const blob = `${text} ${mesh.join(' ')}`
+  const fields = []
+  const patterns = {
+    cardiology: /\b(heart|cardiac|cardiovascular|coronary|atrial|ventricular|myocardial|hypertension|arrhythmia)\b/,
+    oncology: /\b(cancer|tumor|tumour|carcinoma|oncolog|chemo|metastasi|adenocarcinoma|sarcoma|melanoma|leukemia|lymphoma)\b/,
+    neurology: /\b(brain|neuro|stroke|alzheimer|parkinson|dementia|epilepsy|multiple sclerosis|cognitive)\b/,
+    endocrine: /\b(diabetes|insulin|thyroid|hba1c|glycemic|adrenal|pituitary|hormone|obesity)\b/,
+    gastro: /\b(liver|hepat|gastro|colon|intestinal|ibd|crohn|colitis|pancrea|biliary)\b/,
+    pulmonology: /\b(lung|pulmonary|respiratory|asthma|copd|pneumonia)\b/,
+    nephrology: /\b(kidney|renal|dialysis|nephro|glomerul)\b/,
+    rheumatology: /\b(rheumatoid|lupus|arthritis|autoimmune|vasculitis)\b/,
+    psychiatry: /\b(depression|schizophrenia|bipolar|anxiety|psychiatric|psychotic|suicide)\b/,
+    infectious: /\b(infection|infectious|hiv|tuberculosis|antibiotic|sepsis|covid|vaccine|microbi)\b/,
+    pediatrics: /\b(pediatric|paediatric|neonatal|infant|child|adolescent)\b/,
+    obgyn: /\b(pregnan|obstetric|gynec|maternal|fetal|cesarean|delivery)\b/,
+    hematology: /\b(blood|leukemia|lymphoma|anemia|hemato|sickle|thrombo)\b/,
+    surgery: /\b(surgery|surgical|laparoscop|operative|perioperative|anesthesia)\b/,
+    public_health: /\b(epidemiol|public health|population|policy|disparities)\b/,
+    ai_imaging: /\b(deep learning|neural network|machine learning|convolutional|radiomic)\b.{0,200}\b(image|imaging|radiograph|mri|ct|x-ray)\b/,
+  }
+  for (const [k, re] of Object.entries(patterns)) {
+    if (re.test(blob)) fields.push(k)
+  }
+  return fields
+}
+
+// Map field code → likely jcr_category substrings (lowercase)
+const FIELD_CATEGORY_MAP = {
+  cardiology: ['cardiac', 'cardiology', 'cardiovascular', 'peripheral vascular'],
+  oncology: ['oncology', 'cancer', 'hematology'],
+  neurology: ['neuroscience', 'clinical neurology', 'neurology', 'psychiatry'],
+  endocrine: ['endocrinology', 'diabetes', 'metabolism', 'nutrition'],
+  gastro: ['gastroenterology', 'hepatology'],
+  pulmonology: ['respiratory', 'pulmonary'],
+  nephrology: ['urology', 'nephrology'],
+  rheumatology: ['rheumatology'],
+  psychiatry: ['psychiatry', 'psychology'],
+  infectious: ['infectious', 'microbiology', 'virology'],
+  pediatrics: ['pediatric', 'paediatric'],
+  obgyn: ['obstetrics', 'gynecology'],
+  hematology: ['hematology', 'blood'],
+  surgery: ['surgery'],
+  public_health: ['public', 'environmental occupational'],
+  ai_imaging: ['radiology', 'imaging', 'computer'],
+}
+
+function generateJourney(jifPred, manuscript, extraction) {
+  const journals = loadJournals()
+  if (!journals.length || !jifPred || !Number.isFinite(jifPred.point)) return []
+
+  const fields = detectFields(manuscript, extraction)
+  const fieldCats = new Set(
+    fields.flatMap(f => FIELD_CATEGORY_MAP[f] || []).map(s => s.toLowerCase())
+  )
+
+  // Score each journal by (1) JIF fit to target, (2) category fit
+  function scoreFit(j, targetJif) {
+    if (j.jif == null) return 0
+    const ratio = Math.min(j.jif, targetJif) / Math.max(j.jif, targetJif)
+    const fieldBoost = fieldCats.size && j.category
+      ? ([...fieldCats].some(c => j.category.includes(c)) ? 1.6 : 0.8)
+      : 1.0
+    return ratio * fieldBoost
+  }
+
+  function pickBest(targetJif, excludeIssns) {
+    let best = null, bestScore = 0
+    for (const j of journals) {
+      if (excludeIssns.has(j.issn || j.name)) continue
+      const s = scoreFit(j, targetJif)
+      if (s > bestScore) { bestScore = s; best = j }
+    }
+    return best
+  }
+
+  const pred = jifPred.point
+  // 5 steps: stretch → best-fit → backup1 → backup2 → safety
+  const targets = [
+    { step: 1, label: 'stretch (aspirational)',   jif: pred * 1.5, switchCost: 'first submission', switchReason: 'Highest-impact target.' },
+    { step: 2, label: 'best fit (predicted JIF)', jif: pred,        switchCost: 'low',              switchReason: 'Closest match to predicted impact.' },
+    { step: 3, label: 'backup tier-1',            jif: pred * 0.7,  switchCost: 'low',              switchReason: 'Slightly lower IF — broader scope.' },
+    { step: 4, label: 'backup tier-2',            jif: pred * 0.5,  switchCost: 'minimal',          switchReason: 'Pragmatic alternative.' },
+    { step: 5, label: 'safety (OA fast review)',  jif: pred * 0.35, switchCost: 'minimal',          switchReason: 'High-acceptance OA venue for faster timeline.' },
+  ]
+
+  const usedKeys = new Set()
+  const result = []
+  for (const t of targets) {
+    const pick = pickBest(t.jif, usedKeys)
+    if (!pick) continue
+    usedKeys.add(pick.issn || pick.name)
+    result.push({
+      step: t.step,
+      venue: pick.name,
+      issn: pick.issn,
+      if: pick.jif,
+      publisher: pick.publisher || '—',
+      style: pick.category || (pick.is_oa ? 'open access' : 'specialty journal'),
+      switchCost: t.switchCost,
+      switchReason: t.switchReason,
+      tier: pick.tier,
+      is_oa: pick.is_oa,
+    })
+  }
+  return result
+}
+
+export { parseLightGbmModel, predictLightGbm, interpolateIso, generateJourney }

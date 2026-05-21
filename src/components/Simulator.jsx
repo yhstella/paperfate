@@ -237,30 +237,34 @@ function resultLegacyShape(r) {
   const p = r.predictions || {}
   return {
     score: r.overall_score ?? null,
-    tier: jifToTier(p.jcr_jif),
+    tier: jifToTier(p.jcr_jif, r.journey),
     deskReject: deskRejectFormat(p.desk_reject_risk),
     timeline: timelineFromTier(p.jcr_jif),
     citation: citationsFormat(p.citations_5yr, r.overall_score),
     weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
     suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => w.name),
     similars: [],
+    journey: r.journey || [],
   }
 }
 
-function jifToTier(j) {
+function jifToTier(j, journey) {
   if (!j || !Number.isFinite(j.point)) return { range: '—', bestFit: '—', stretch: '—' }
   const pt = j.point, lo = j.ci_low, hi = j.ci_high
+  // Prefer concrete journal names from journey when available
+  const bestFitJournal = journey?.find(s => s.step === 2)?.venue
+  const stretchJournal = journey?.find(s => s.step === 1)?.venue
   const tierLabel = (v) =>
-    v >= 30 ? 'Top tier (NEJM · Lancet · Nature · Cell)'
-    : v >= 10 ? 'High tier (JAMA · Nature subsidiaries · top specialty)'
-    : v >= 5 ? 'Upper-mid tier (strong specialty journals)'
-    : v >= 3 ? 'Mid tier (specialty journals)'
-    : v >= 1.5 ? 'Lower-mid tier (broad specialty)'
-    : 'Lower tier (regional / niche specialty)'
+    v >= 30 ? 'Top tier'
+    : v >= 10 ? 'High tier'
+    : v >= 5 ? 'Upper-mid tier'
+    : v >= 3 ? 'Mid tier'
+    : v >= 1.5 ? 'Lower-mid tier'
+    : 'Lower tier'
   return {
     range: `JIF ${pt.toFixed(1)} (90% CI ${lo.toFixed(1)}–${hi.toFixed(1)})`,
-    bestFit: tierLabel(pt),
-    stretch: hi > pt * 1.3 ? tierLabel(hi) : '—',
+    bestFit: bestFitJournal ? `${bestFitJournal} (${tierLabel(pt)})` : tierLabel(pt),
+    stretch: stretchJournal ? `${stretchJournal} (${tierLabel(hi)})` : (hi > pt * 1.3 ? tierLabel(hi) : '—'),
   }
 }
 
