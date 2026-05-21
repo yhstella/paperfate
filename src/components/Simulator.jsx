@@ -234,16 +234,70 @@ export default function Simulator() {
 // designed for, so the existing 6-card layout still renders.
 function resultLegacyShape(r) {
   if (r?.legacy) return r.legacy   // already the mock shape
-  // Otherwise, derive a legacy-like view from the new schema
+  const p = r.predictions || {}
   return {
     score: r.overall_score ?? null,
-    tier: { range: 'TBD', bestFit: 'TBD', stretch: 'TBD' },
-    deskReject: { pct: null, label: '—' },
-    timeline: { weeks: '—', note: 'Awaiting server-side forecast wiring' },
-    citation: { range: '—', percentile: null, peerMedian: null },
-    weakness: r.key_weaknesses?.[0]?.rationale || 'See domain rollup below.',
-    suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => `${w.name}: ${w.rationale}`),
+    tier: jifToTier(p.jcr_jif),
+    deskReject: deskRejectFormat(p.desk_reject_risk),
+    timeline: timelineFromTier(p.jcr_jif),
+    citation: citationsFormat(p.citations_5yr, r.overall_score),
+    weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
+    suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => w.name),
     similars: [],
+  }
+}
+
+function jifToTier(j) {
+  if (!j || !Number.isFinite(j.point)) return { range: '—', bestFit: '—', stretch: '—' }
+  const pt = j.point, lo = j.ci_low, hi = j.ci_high
+  const tierLabel = (v) =>
+    v >= 30 ? 'Top tier (NEJM · Lancet · Nature · Cell)'
+    : v >= 10 ? 'High tier (JAMA · Nature subsidiaries · top specialty)'
+    : v >= 5 ? 'Upper-mid tier (strong specialty journals)'
+    : v >= 3 ? 'Mid tier (specialty journals)'
+    : v >= 1.5 ? 'Lower-mid tier (broad specialty)'
+    : 'Lower tier (regional / niche specialty)'
+  return {
+    range: `JIF ${pt.toFixed(1)} (90% CI ${lo.toFixed(1)}–${hi.toFixed(1)})`,
+    bestFit: tierLabel(pt),
+    stretch: hi > pt * 1.3 ? tierLabel(hi) : '—',
+  }
+}
+
+function deskRejectFormat(d) {
+  if (!d || !Number.isFinite(d.point)) return { pct: null, label: '—' }
+  const pct = Math.round(d.point * 100)
+  const label =
+    d.point >= 0.6 ? 'High'
+    : d.point >= 0.35 ? 'Moderate'
+    : d.point >= 0.15 ? 'Low'
+    : 'Very Low'
+  return { pct, label }
+}
+
+function timelineFromTier(j) {
+  if (!j || !Number.isFinite(j.point)) return { weeks: '—', note: 'Timeline estimate unavailable' }
+  const pt = j.point
+  // Heuristic: higher-tier journals → longer review
+  const weeks =
+    pt >= 30 ? '12–16'
+    : pt >= 10 ? '8–14'
+    : pt >= 3 ? '6–10'
+    : '4–8'
+  return { weeks, note: 'Heuristic estimate from journal tier (v0.1 — not learned)' }
+}
+
+function citationsFormat(c, score) {
+  if (!c || !Number.isFinite(c.point)) return { range: '—', percentile: null, peerMedian: null }
+  const pt = Math.max(0, Math.round(c.point))
+  const lo = Math.max(0, Math.round(c.ci_low))
+  const hi = Math.max(0, Math.round(c.ci_high))
+  // Rough percentile from overall_score
+  const pct = Number.isFinite(score) ? Math.max(1, Math.min(99, 100 - score)) : null
+  return {
+    range: `${lo}–${hi} citations (point: ${pt})`,
+    percentile: pct,
+    peerMedian: pt,
   }
 }
 

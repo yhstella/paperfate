@@ -33,14 +33,11 @@ export default function DomainRollup({ rollup, keyWeaknesses }) {
           <ul className="space-y-2">
             {keyWeaknesses.map((w, i) => (
               <li key={w.id} className="rounded-lg border border-white/5 bg-ink-900/60 p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-sm font-medium text-slate-200">
-                    <span className="text-slate-500">{i + 1}.</span> {w.name}
-                    <span className="ml-2 text-[10px] text-slate-500">{w.id}</span>
-                  </div>
-                  <div className="font-mono text-xs text-amber-300/80">score {w.score}/5</div>
+                <div className="text-sm font-medium text-slate-200">
+                  <span className="text-slate-500">{i + 1}.</span> {w.name}
+                  <span className="ml-2 text-[10px] text-slate-500">{w.id}</span>
                 </div>
-                {w.rationale && (
+                {w.rationale && !/Local deterministic scorer/i.test(w.rationale) && (
                   <div className="mt-1 text-xs leading-relaxed text-slate-400">{w.rationale}</div>
                 )}
                 {w.evidence && (
