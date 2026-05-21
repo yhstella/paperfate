@@ -19,6 +19,8 @@
 //   4xx / 5xx → { error, detail }
 
 import { forecastManuscript } from '../src/server/extract.js'
+import { forecastManuscriptDeterministic } from '../src/server/deterministicExtract.js'
+import { predictFromExtraction } from '../src/server/fatecoreInference.js'
 
 // Allow ~5 minutes for full Q500 runs. Vercel Pro plan needed for >60s functions;
 // on hobby plan this is best-effort and may time out for large requests.
@@ -69,16 +71,12 @@ export default async function handler(req, res) {
   let body
   try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e)) }
 
-  const { title, abstract, methods, results, discussion, full_text, article_type = '*', mode = 'auto' } = body || {}
+  const { title, abstract, methods, results, discussion, full_text, article_type = '*', mode = 'auto', target_journal } = body || {}
 
   if (!title || typeof title !== 'string' || title.trim().length < 5)
     return bad(res, 400, 'missing_or_short_title')
   if (!abstract || typeof abstract !== 'string' || abstract.trim().length < 200)
     return bad(res, 400, 'missing_or_short_abstract', 'abstract must be ≥200 chars')
-
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
-    return bad(res, 500, 'llm_api_key_missing', 'No LLM provider configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.')
-  }
 
   const manuscript = {
     title: title.trim(),
@@ -91,13 +89,23 @@ export default async function handler(req, res) {
 
   const t0 = Date.now()
   try {
-    const result = await forecastManuscript(manuscript, article_type, {
-      mode: mode === 'auto' ? undefined : mode,
-      concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 10,
+    const normalizedMode = mode === 'abstract' ? 'Q100' : mode === 'full' ? 'Q500' : mode
+    const hasLlmKey = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY)
+    const extractorMode = process.env.PAPERFATE_EXTRACTOR || 'codex_deterministic'
+    const useDeterministic = extractorMode !== 'llm' || !hasLlmKey
+    const extraction = useDeterministic
+      ? forecastManuscriptDeterministic(manuscript, article_type, { mode: normalizedMode })
+      : await forecastManuscript(manuscript, article_type, {
+          mode: normalizedMode === 'auto' ? undefined : normalizedMode,
+          concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 10,
+        })
+    const fatecore = predictFromExtraction(manuscript, extraction, {
+      targetJournal: target_journal || {},
     })
     const wallMs = Date.now() - t0
     return res.status(200).json({
-      ...result,
+      ...extraction,
+      ...fatecore,
       wall_ms: wallMs,
       server_version: '0.2.0',
     })
