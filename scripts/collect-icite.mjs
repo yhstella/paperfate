@@ -125,7 +125,7 @@ async function loadAlreadyFetched(file) {
     let n = 0
     for await (const line of rl) {
       if (!line.trim()) continue
-      const m = line.match(/"pmid"\s*:\s*(\d+)/)
+      const m = line.match(/"pmid"\s*:\s*"?(\d+)"?/)
       if (m) done.add(m[1])
       n++
     }
