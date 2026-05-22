@@ -136,24 +136,36 @@ function compact(v) {
   }
 }
 
-function* iterVenueIds() {
+async function* iterVenueIds() {
   if (!existsSync(IN_DIR)) return
+  const { createReadStream } = await import('node:fs')
+  const { createInterface } = await import('node:readline')
   const files = readdirSync(IN_DIR).filter(f => f.endsWith('.jsonl'))
   for (const f of files) {
-    const lines = readFileSync(join(IN_DIR, f), 'utf-8').split('\n').filter(Boolean)
-    for (const line of lines) {
-      let rec
-      try { rec = JSON.parse(line) } catch { continue }
-      const vid = rec.venue?.id
-      if (vid) yield vid
+    const rl = createInterface({ input: createReadStream(join(IN_DIR, f), { encoding: 'utf8' }), crlfDelay: Infinity })
+    for await (const line of rl) {
+      if (!line) continue
+      // Fast regex extract instead of full JSON.parse on 5GB files
+      const m = line.match(/"venue"\s*:\s*\{[^}]*"id"\s*:\s*"([^"]+)"/)
+      if (m) yield m[1]
     }
   }
 }
 
-function loadAlreadyFetched(outFile) {
+async function loadAlreadyFetched(outFile) {
   if (!existsSync(outFile)) return new Set()
-  const text = readFileSync(outFile, 'utf-8')
+  const { createReadStream } = await import('node:fs')
+  const { createInterface } = await import('node:readline')
+  const rl = createInterface({ input: createReadStream(outFile, { encoding: 'utf8' }), crlfDelay: Infinity })
   const done = new Set()
+  for await (const line of rl) {
+    if (!line) continue
+    const m = line.match(/"id"\s*:\s*"([^"]+)"/)
+    if (m) done.add(m[1])
+  }
+  return done
+  // Original code follows but is unreachable:
+  const text = readFileSync(outFile, 'utf-8')
   for (const line of text.split('\n')) {
     if (!line) continue
     try {
@@ -167,12 +179,12 @@ function loadAlreadyFetched(outFile) {
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true })
   const outPath = join(OUT_DIR, `sources-${todayStamp()}.jsonl`)
-  const already = loadAlreadyFetched(outPath)
+  const already = await loadAlreadyFetched(outPath)
 
   // Dedup venue IDs across all corpus papers
   const queue = []
   const seen = new Set(already)
-  for (const id of iterVenueIds()) {
+  for await (const id of iterVenueIds()) {
     if (seen.has(id)) continue
     seen.add(id)
     queue.push(id)
