@@ -22,8 +22,8 @@ const IN_DIR  = join(DATA_ROOT, 'pubmed')
 const OUT_DIR = join(DATA_ROOT, 'crossref')
 
 const EMAIL = process.env.CROSSREF_EMAIL || process.env.OPENALEX_EMAIL || 'beta@paperfate.com'
-const REQ_PER_SEC = 8       // polite-pool friendly
-const PARALLEL = 4
+const REQ_PER_SEC = 25      // polite-pool friendly
+const PARALLEL = 8
 const API_BASE = 'https://api.crossref.org/works/'
 
 function pad(n) { return String(n).padStart(2, '0') }
@@ -128,16 +128,21 @@ function* iterPubMedDois(filter) {
   }
 }
 
-function loadAlreadyFetched(outFile) {
-  if (!existsSync(outFile)) return new Set()
-  const text = readFileSync(outFile, 'utf-8')
+async function loadAlreadyFetched(outFile) {
+  const { createReadStream, readdirSync } = await import('node:fs')
+  const { createInterface } = await import('node:readline')
   const done = new Set()
-  for (const line of text.split('\n')) {
-    if (!line) continue
-    try {
-      const r = JSON.parse(line)
-      if (r.doi) done.add(String(r.doi).toLowerCase())
-    } catch {}
+  const files = readdirSync(OUT_DIR).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))
+  for (const fname of files) {
+    const rl = createInterface({ input: createReadStream(join(OUT_DIR, fname), { encoding: 'utf8' }), crlfDelay: Infinity })
+    let n = 0
+    for await (const line of rl) {
+      if (!line) continue
+      const m = line.match(/"doi"\s*:\s*"([^"]+)"/)
+      if (m) done.add(m[1].toLowerCase())
+      n++
+    }
+    console.log(`  loaded ${fname}: ${n} rows, cumulative ${done.size}`)
   }
   return done
 }
@@ -146,7 +151,7 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true })
   const filter = process.argv.slice(2)
   const outPath = join(OUT_DIR, `all-${todayStamp()}.jsonl`)
-  const already = loadAlreadyFetched(outPath)
+  const already = await loadAlreadyFetched(outPath)
 
   const queue = []
   const seen = new Set(already)

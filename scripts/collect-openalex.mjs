@@ -110,8 +110,10 @@ function compact(work) {
       oa_url: oa.oa_url,
     },
     authorships: (work.authorships || []).slice(0, 8).map(a => ({
+      author_id: a.author?.id,
       author: a.author?.display_name,
       orcid: a.author?.orcid,
+      first_inst_id: a.institutions?.[0]?.id,
       first_inst: a.institutions?.[0]?.display_name,
       first_country: a.institutions?.[0]?.country_code,
       is_corresponding: a.is_corresponding,
@@ -135,16 +137,26 @@ function* iterPubMedDois(filter) {
   }
 }
 
-function loadAlreadyFetched(outFile) {
-  if (!existsSync(outFile)) return new Set()
-  const text = readFileSync(outFile, 'utf-8')
+async function loadAlreadyFetched(outFile) {
+  // Glob ALL historical JSONL files in OUT_DIR (not just today's) — papers
+  // grew across days and we don't want to re-fetch what's already in any
+  // previous run's output.
   const done = new Set()
-  for (const line of text.split('\n')) {
-    if (!line) continue
-    try {
-      const r = JSON.parse(line)
-      if (r.doi) done.add(String(r.doi).toLowerCase())
-    } catch {}
+  const files = readdirSync(OUT_DIR).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))
+  for (const fname of files) {
+    const fpath = join(OUT_DIR, fname)
+    const { createReadStream } = await import('node:fs')
+    const { createInterface } = await import('node:readline')
+    const rl = createInterface({ input: createReadStream(fpath, { encoding: 'utf8' }), crlfDelay: Infinity })
+    let n = 0
+    for await (const line of rl) {
+      if (!line) continue
+      // Quick DOI extract without full JSON parse (faster on huge files)
+      const m = line.match(/"doi"\s*:\s*"([^"]+)"/)
+      if (m) done.add(m[1].toLowerCase())
+      n++
+    }
+    console.log(`  loaded ${fname}: ${n} rows, cumulative ${done.size}`)
   }
   return done
 }
@@ -153,7 +165,7 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true })
   const filter = process.argv.slice(2)
   const outPath = join(OUT_DIR, `all-${todayStamp()}.jsonl`)
-  const already = loadAlreadyFetched(outPath)
+  const already = await loadAlreadyFetched(outPath)
 
   // Build dedup'd queue of DOIs (across all PubMed JSONL files)
   const queue = []
