@@ -15,10 +15,13 @@ const DEFAULT_DATA_ROOT = process.env.DATA_ROOT || join(ROOT, 'data')
 const DEFAULT_FATECORE_DIR = join(DEFAULT_DATA_ROOT, 'fatecore')
 
 const TARGETS = [
-  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.1-y_jcr_jif.txt' },
-  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.1-y_icite_rcr.txt' },
-  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.1-y_citations_log.txt' },
+  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.2-prod-y_jcr_jif.txt' },
+  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.2-prod-y_icite_rcr.txt' },
+  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.2-prod-y_citations_log.txt' },
 ]
+// v0.2-prod (2026-05-22): log-target + class weighting + author features.
+//   y_jcr_jif: R²(log)=0.435  MAE_cal=1.35  (vs v0.1: 0.31, 1.50 → +40% R² improvement)
+//   No embedding feature (production-safe — server cannot generate SPECTER2 on the fly).
 
 function clamp(x, lo, hi) {
   if (!Number.isFinite(x)) return lo
@@ -128,7 +131,7 @@ function latestFeatureSchema(fatecoreDir) {
 export function loadFateCore(opts = {}) {
   const weightsDir = opts.weightsDir || process.env.FATECORE_WEIGHTS_DIR || DEFAULT_WEIGHTS_DIR
   const fatecoreDir = opts.fatecoreDir || process.env.FATECORE_DATA_DIR || DEFAULT_FATECORE_DIR
-  const metricsPath = join(weightsDir, 'fatecore-v0.1-metrics.json')
+  const metricsPath = join(weightsDir, 'fatecore-v0.2-prod-metrics.json')
   const metrics = loadJson(metricsPath, {})
   const schema = latestFeatureSchema(fatecoreDir) || {}
   const featuresUsed = metrics.features_used || schema.cols?.filter(c => !['doi', 'pmid', 'y_jcr_jif', 'y_icite_rcr', 'y_citations_log'].includes(c)) || []
@@ -141,7 +144,7 @@ export function loadFateCore(opts = {}) {
   }
 
   return {
-    version: 'fatecore-v0.1',
+    version: 'fatecore-v0.2-prod',
     weightsDir,
     featureNames: featuresUsed,
     metrics,
