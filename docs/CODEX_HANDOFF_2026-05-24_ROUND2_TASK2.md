@@ -2,7 +2,11 @@
 
 ## Status
 
-Implemented locally; deploy commit/push pending at the time this handoff was written.
+Completed and pushed.
+
+- commit: `d2fba77 feat(fatecore): train and deploy v0.3`
+- pushed: `origin/main`
+- production verification: passed on `2026-05-24T11:33:59+09:00`
 
 ## Deploy Condition
 
@@ -82,6 +86,20 @@ Result:
 - loaded targets: all 3
 - predicted JIF point: `57.69`
 - confidence: `0.879`
+
+Production endpoint:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri https://paperfate.com/api/forecast -ContentType application/json -Body ...
+```
+
+Result:
+
+- `server_version`: `0.3.0`
+- `fatecore_version`: `fatecore-v0.3`
+- `model_status`: `loaded`
+- `feature_count`: `66`
+- EMPA-style predicted JIF point: `59.731`
 
 ## Caveat
 
