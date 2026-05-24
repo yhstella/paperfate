@@ -1,4 +1,4 @@
-// FateCore v0.1 inference runtime.
+// FateCore inference runtime.
 //
 // Loads LightGBM native .txt models when available. Until Claude's training
 // finishes, the same public interface returns a calibrated heuristic fallback
@@ -15,13 +15,13 @@ const DEFAULT_DATA_ROOT = process.env.DATA_ROOT || join(ROOT, 'data')
 const DEFAULT_FATECORE_DIR = join(DEFAULT_DATA_ROOT, 'fatecore')
 
 const TARGETS = [
-  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.2-prod-y_jcr_jif.txt' },
-  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.2-prod-y_icite_rcr.txt' },
-  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.2-prod-y_citations_log.txt' },
+  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.3-y_jcr_jif.txt' },
+  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.3-y_icite_rcr.txt' },
+  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.3-y_citations_log.txt' },
 ]
-// v0.2-prod (2026-05-22): log-target + class weighting + author features.
-//   y_jcr_jif: R²(log)=0.435  MAE_cal=1.35  (vs v0.1: 0.31, 1.50 → +40% R² improvement)
-//   No embedding feature (production-safe — server cannot generate SPECTER2 on the fly).
+// v0.3 (2026-05-24): compact Q aggregates + author/NIH/fulltext/prior-journal features.
+//   y_jcr_jif: R²(log)=0.9525 on the enriched v0.3 CSV.
+//   Cold-start-only features that are unavailable at submission time are left as NaN.
 
 function clamp(x, lo, hi) {
   if (!Number.isFinite(x)) return lo
@@ -131,10 +131,15 @@ function latestFeatureSchema(fatecoreDir) {
 export function loadFateCore(opts = {}) {
   const weightsDir = opts.weightsDir || process.env.FATECORE_WEIGHTS_DIR || DEFAULT_WEIGHTS_DIR
   const fatecoreDir = opts.fatecoreDir || process.env.FATECORE_DATA_DIR || DEFAULT_FATECORE_DIR
-  const metricsPath = join(weightsDir, 'fatecore-v0.2-prod-metrics.json')
+  const metricsPath = join(weightsDir, 'fatecore-v0.3-metrics.json')
   const metrics = loadJson(metricsPath, {})
   const schema = latestFeatureSchema(fatecoreDir) || {}
-  const featuresUsed = metrics.features_used || schema.cols?.filter(c => !['doi', 'pmid', 'y_jcr_jif', 'y_icite_rcr', 'y_citations_log'].includes(c)) || []
+  const featuresUsed =
+    metrics.feature_cols ||
+    metrics.features_used ||
+    schema.feature_cols ||
+    schema.cols?.filter(c => !['doi', 'pmid', 'y_jcr_jif', 'y_icite_rcr', 'y_citations_log'].includes(c)) ||
+    []
 
   const models = {}
   for (const target of TARGETS) {
@@ -144,7 +149,7 @@ export function loadFateCore(opts = {}) {
   }
 
   return {
-    version: 'fatecore-v0.2-prod',
+    version: 'fatecore-v0.3',
     weightsDir,
     featureNames: featuresUsed,
     metrics,
@@ -190,6 +195,67 @@ function firstFinite(...values) {
   return NaN
 }
 
+function wordCount(text) {
+  if (!text) return 0
+  const m = String(text).trim().match(/\S+/g)
+  return m ? m.length : 0
+}
+
+function structuredAbstract(text) {
+  return /\b(background|objective|methods?|results?|conclusions?|importance|design|setting|participants|interventions?)\s*:/i.test(String(text || '')) ? 1 : 0
+}
+
+function pubTypeFlags(manuscript, extraction) {
+  const blob = `${extraction?.article_type || ''} ${manuscript?.article_type || ''} ${manuscript?.title || ''} ${manuscript?.abstract || ''}`.toLowerCase()
+  return {
+    is_review: /\b(review|meta-analysis|systematic review)\b/.test(blob) ? 1 : 0,
+    is_case_report: /\bcase report\b/.test(blob) ? 1 : 0,
+    is_trial: /\b(randomized|randomised|clinical trial|trial|rct)\b/.test(blob) ? 1 : 0,
+  }
+}
+
+function stableStringHash(value) {
+  if (!value) return NaN
+  let h = 2166136261
+  for (const ch of String(value)) {
+    h ^= ch.charCodeAt(0)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+function qStats(extraction) {
+  const items = extractionItems(extraction)
+  const values = items.map(scoreToNumber)
+  const numeric = values.filter(v => Number.isFinite(v) && v >= 0)
+  const na = values.filter(v => v === -1).length
+  const unknown = values.filter(v => v === -2 || Number.isNaN(v)).length
+  const mean = numeric.length ? numeric.reduce((a, b) => a + b, 0) / numeric.length : NaN
+  const sd = numeric.length
+    ? Math.sqrt(numeric.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / numeric.length)
+    : NaN
+  return {
+    q_score_count: items.length,
+    q_numeric_count: numeric.length,
+    q_score_mean: mean,
+    q_score_sd: sd,
+    q_score_min: numeric.length ? Math.min(...numeric) : NaN,
+    q_score_max: numeric.length ? Math.max(...numeric) : NaN,
+    q_numeric_frac: items.length ? numeric.length / items.length : NaN,
+    q_na_count: na,
+    q_unknown_count: unknown,
+    q_na_frac: items.length ? na / items.length : NaN,
+  }
+}
+
+function priorJournalValue(targetJournal, ...names) {
+  for (const name of names) {
+    const n = Number(targetJournal?.[name])
+    if (Number.isFinite(n)) return n
+  }
+  return NaN
+}
+
 export function buildFeatureVector(manuscript, extraction, model, opts = {}) {
   const targetJournal = opts.targetJournal || {}
   const authorFeatures =
@@ -201,24 +267,61 @@ export function buildFeatureVector(manuscript, extraction, model, opts = {}) {
   const itemMap = new Map(extractionItems(extraction).map(item => [item.id, item]))
   const year = Number(opts.year || manuscript?.year || new Date().getFullYear())
   const nowYear = new Date().getFullYear()
+  const flags = pubTypeFlags(manuscript, extraction)
+  const q = qStats(extraction)
+  const fundingText = `${manuscript?.funder || ''} ${manuscript?.funding || ''}`
+  const meshTerms = Array.isArray(manuscript?.mesh_terms) ? manuscript.mesh_terms : []
+  const firstMesh = meshTerms[0] ? String(meshTerms[0]).split('/')[0].toLowerCase() : ''
 
   const values = {
     year,
     pub_year_age: Math.max(0, nowYear - year),
+    title_word_count: wordCount(manuscript?.title),
+    abstract_word_count: wordCount(manuscript?.abstract),
+    has_structured_abstract: structuredAbstract(manuscript?.abstract),
     is_research_article: 1,
     is_clinical: inferClinical(manuscript, extraction),
+    icite_is_clinical: inferClinical(manuscript, extraction),
+    is_review: flags.is_review,
+    is_case_report: flags.is_case_report,
+    is_trial: flags.is_trial,
     author_count: countAuthors(manuscript),
     has_first_affiliation: manuscript?.first_affiliation ? 1 : NaN,
     has_funder: manuscript?.funder || manuscript?.funding ? 1 : 0,
+    has_nih_grant: /\b(NIH|NCI|NHLBI|NIDDK|NIAID|R01|R21|U01|P30|K23|K99)\b/i.test(fundingText) ? 1 : 0,
+    n_nih_grants: (fundingText.match(/\b(?:R01|R21|U01|P30|K23|K99)[A-Z0-9-]*\b/gi) || []).length,
     publication_types_count: NaN,
-    mesh_terms_count: NaN,
+    mesh_terms_count: meshTerms.length || NaN,
+    first_mesh_root_hash: stableStringHash(firstMesh),
     is_preprint: manuscript?.is_preprint ? 1 : 0,
+    preprint_exists: manuscript?.is_preprint ? 1 : 0,
+    preprint_pub_gap_days: NaN,
     first_author_h_index: firstFinite(manuscript?.first_author_h_index, authorFeatures.first_author_h_index),
     last_author_h_index: firstFinite(manuscript?.last_author_h_index, authorFeatures.last_author_h_index),
     max_team_h_index: firstFinite(manuscript?.max_team_h_index, authorFeatures.max_team_h_index),
     median_team_h_index: firstFinite(manuscript?.median_team_h_index, authorFeatures.median_team_h_index),
     team_size_with_id: firstFinite(manuscript?.team_size_with_id, authorFeatures.team_size_with_id),
     international_collab: firstFinite(manuscript?.international_collab, authorFeatures.international_collab),
+    citations_openalex: NaN,
+    fwci: NaN,
+    fwci_topic_norm: NaN,
+    reference_count: NaN,
+    funder_count: manuscript?.funder || manuscript?.funding ? 1 : 0,
+    unpaywall_is_oa: NaN,
+    unpaywall_journal_oa: NaN,
+    unpaywall_journal_doaj: NaN,
+    has_pmcid: 0,
+    pmc_body_word_count: wordCount(manuscript?.full_text),
+    pmc_figure_count: NaN,
+    pmc_table_count: NaN,
+    pmc_ref_count: NaN,
+    epmc_body_word_count: NaN,
+    pdf_body_words: NaN,
+    icite_citation_count: NaN,
+    icite_nih_percentile: NaN,
+    icite_apt: NaN,
+    icite_cited_by_clin: NaN,
+    ...q,
     j_h_index: targetJournal.h_index ?? targetJournal.j_h_index ?? NaN,
     j_i10_index: targetJournal.i10_index ?? targetJournal.j_i10_index ?? NaN,
     j_two_yr_mean_citedness: targetJournal.two_yr_mean_citedness ?? targetJournal.j_two_yr_mean_citedness ?? NaN,
@@ -231,13 +334,24 @@ export function buildFeatureVector(manuscript, extraction, model, opts = {}) {
     j_first_publication_year: targetJournal.first_publication_year ?? targetJournal.j_first_publication_year ?? NaN,
     j_jcr_jif_5yr: targetJournal.jcr_jif_5yr ?? targetJournal.j_jcr_jif_5yr ?? NaN,
     j_jci: targetJournal.jci ?? targetJournal.j_jci ?? NaN,
+    j_hist_metric_age: priorJournalValue(targetJournal, 'j_hist_metric_age', 'prior_metric_age'),
+    j_hist_jcr_jif: priorJournalValue(targetJournal, 'j_hist_jcr_jif', 'prior_jcr_jif', 'jcr_jif_prior', 'jcr_jif', 'jif'),
+    j_hist_jcr_jif_5yr: priorJournalValue(targetJournal, 'j_hist_jcr_jif_5yr', 'prior_jcr_jif_5yr', 'jcr_jif_5yr_prior', 'jcr_jif_5yr', 'j_jcr_jif_5yr'),
+    j_hist_jci: priorJournalValue(targetJournal, 'j_hist_jci', 'prior_jci', 'jci_prior', 'jci', 'j_jci'),
+    j_hist_sjr: priorJournalValue(targetJournal, 'j_hist_sjr', 'prior_sjr', 'sjr_prior', 'sjr'),
+    j_hist_scimago_h_index: priorJournalValue(targetJournal, 'j_hist_scimago_h_index', 'prior_scimago_h_index'),
+    j_hist_total_docs_year: priorJournalValue(targetJournal, 'j_hist_total_docs_year', 'prior_total_docs_year'),
+    j_hist_cites_per_doc_2y: priorJournalValue(targetJournal, 'j_hist_cites_per_doc_2y', 'prior_cites_per_doc_2y'),
+    j_hist_eigenfactor: priorJournalValue(targetJournal, 'j_hist_eigenfactor', 'prior_eigenfactor'),
+    j_hist_article_influence: priorJournalValue(targetJournal, 'j_hist_article_influence', 'prior_article_influence'),
   }
 
   const featureNames = model.featureNames || []
   const vector = featureNames.map(name => {
-    if (name.startsWith('q_')) return scoreToNumber(itemMap.get(name.slice(2)))
     const v = values[name]
-    return Number.isFinite(v) ? Number(v) : NaN
+    if (Number.isFinite(v)) return Number(v)
+    if (name.startsWith('q_')) return scoreToNumber(itemMap.get(name.slice(2)))
+    return NaN
   })
   return { featureNames, vector }
 }
@@ -285,9 +399,24 @@ function interval(point, radius, lo, hi) {
 function applyTargetCalibration(raw, target, model) {
   const m = model.metrics?.[target.label] || {}
   const point = interpolateIso(raw, m.iso_x, m.iso_y)
-  const q90 = Number(m.conformal_q90)
+  const q90 = Number(m.conformal_q90_transformed ?? m.conformal_q90_log ?? m.conformal_q90)
   const radius = Number.isFinite(q90) ? q90 : Math.max(1, Math.abs(point) * 0.4)
-  return { point, radius }
+  return { point, radius, logScale: !!m.log_scale }
+}
+
+function calibratedInterval(cal, target) {
+  const hi = target.key === 'citations_5yr' ? 100000 : target.key === 'jcr_jif' ? 300 : 100
+  if (cal.logScale || target.key === 'citations_5yr') {
+    const point = Math.expm1(cal.point)
+    const lo = Math.expm1(cal.point - cal.radius)
+    const upper = Math.expm1(cal.point + cal.radius)
+    return {
+      point: +clamp(point, 0, hi).toFixed(3),
+      ci_low: +clamp(lo, 0, hi).toFixed(3),
+      ci_high: +clamp(upper, 0, hi).toFixed(3),
+    }
+  }
+  return interval(cal.point, cal.radius, 0, hi)
 }
 
 export function predictFromExtraction(manuscript, extraction, opts = {}) {
@@ -301,10 +430,7 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
     if (!lgb) continue
     const raw = predictLightGbm(lgb, vector)
     const cal = applyTargetCalibration(raw, target, model)
-    const value = target.key === 'citations_5yr' ? Math.expm1(cal.point) : cal.point
-    const radius = target.key === 'citations_5yr' ? Math.max(5, value * 0.8) : cal.radius
-    const hi = target.key === 'citations_5yr' ? 100000 : target.key === 'jcr_jif' ? 300 : 100
-    predictions[target.key] = interval(value, radius, 0, hi)
+    predictions[target.key] = calibratedInterval(cal, target)
     modelTargets++
   }
 

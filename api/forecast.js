@@ -10,6 +10,17 @@
 //     results:      string?,
 //     discussion:   string?,
 //     full_text:    string?,     // concatenated full text fallback
+//     authors:      string[]|string?,
+//     year:         number?,
+//     first_affiliation: string?,
+//     author_features: {
+//       first_author_h_index?: number,
+//       last_author_h_index?: number,
+//       max_team_h_index?: number,
+//       median_team_h_index?: number,
+//       team_size_with_id?: number,
+//       international_collab?: 0|1
+//     }?,
 //     article_type: string?,     // schema.json article_types, default "*"
 //     mode:         "Q100"|"Q500"|"auto"?,  // default "auto"
 //   }
@@ -71,7 +82,24 @@ export default async function handler(req, res) {
   let body
   try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e)) }
 
-  const { title, abstract, methods, results, discussion, full_text, article_type = '*', mode = 'auto', target_journal } = body || {}
+  const {
+    title,
+    abstract,
+    methods,
+    results,
+    discussion,
+    full_text,
+    authors,
+    year,
+    first_affiliation,
+    funder,
+    funding,
+    is_preprint,
+    author_features,
+    article_type = '*',
+    mode = 'auto',
+    target_journal,
+  } = body || {}
 
   if (!title || typeof title !== 'string' || title.trim().length < 5)
     return bad(res, 400, 'missing_or_short_title')
@@ -85,6 +113,13 @@ export default async function handler(req, res) {
     ...(results    && { results }),
     ...(discussion && { discussion }),
     ...(full_text  && { full_text }),
+    ...((Array.isArray(authors) || typeof authors === 'string') && { authors }),
+    ...(Number.isFinite(Number(year)) && { year: Number(year) }),
+    ...(first_affiliation && { first_affiliation }),
+    ...(funder && { funder }),
+    ...(funding && { funding }),
+    ...(typeof is_preprint === 'boolean' && { is_preprint }),
+    ...(author_features && typeof author_features === 'object' && { author_features }),
   }
 
   const t0 = Date.now()
@@ -101,13 +136,14 @@ export default async function handler(req, res) {
         })
     const fatecore = predictFromExtraction(manuscript, extraction, {
       targetJournal: target_journal || {},
+      authorFeatures: author_features || {},
     })
     const wallMs = Date.now() - t0
     return res.status(200).json({
       ...extraction,
       ...fatecore,
       wall_ms: wallMs,
-      server_version: '0.2.0',
+      server_version: '0.3.0',
     })
   } catch (e) {
     return bad(res, 500, 'extraction_failed', String(e.message || e))
