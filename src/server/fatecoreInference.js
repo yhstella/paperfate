@@ -15,13 +15,18 @@ const DEFAULT_DATA_ROOT = process.env.DATA_ROOT || join(ROOT, 'data')
 const DEFAULT_FATECORE_DIR = join(DEFAULT_DATA_ROOT, 'fatecore')
 
 const TARGETS = [
-  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.3-y_jcr_jif.txt' },
-  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.3-y_icite_rcr.txt' },
-  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.3-y_citations_log.txt' },
+  { key: 'jcr_jif', label: 'y_jcr_jif', file: 'fatecore-v0.2-prod-y_jcr_jif.txt' },
+  { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.2-prod-y_icite_rcr.txt' },
+  { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.2-prod-y_citations_log.txt' },
 ]
-// v0.3 (2026-05-24): compact Q aggregates + author/NIH/fulltext/prior-journal features.
-//   y_jcr_jif: R²(log)=0.9525 on the enriched v0.3 CSV.
-//   Cold-start-only features that are unavailable at submission time are left as NaN.
+// ROLLBACK 2026-05-24: v0.3 deployed with severe data leakage (icite_citation_count,
+// citations_openalex, fwci, pmc_body_word_count are post-publication features that
+// don't exist for cold-start submissions). R²=0.9525 was test-set illusion — real
+// production behavior was WORSE than v0.2-prod (EMPA-REG JIF prediction dropped
+// from 1.25 to 0.61). Reverted to v0.2-prod until v0.3-prepub is retrained with
+// pre-submission features only.
+// v0.2-prod (2026-05-22): log-target + class weighting + author features.
+//   y_jcr_jif: R²(log)=0.435  MAE_cal=1.35  (honest pre-submission baseline)
 
 function clamp(x, lo, hi) {
   if (!Number.isFinite(x)) return lo
@@ -131,7 +136,7 @@ function latestFeatureSchema(fatecoreDir) {
 export function loadFateCore(opts = {}) {
   const weightsDir = opts.weightsDir || process.env.FATECORE_WEIGHTS_DIR || DEFAULT_WEIGHTS_DIR
   const fatecoreDir = opts.fatecoreDir || process.env.FATECORE_DATA_DIR || DEFAULT_FATECORE_DIR
-  const metricsPath = join(weightsDir, 'fatecore-v0.3-metrics.json')
+  const metricsPath = join(weightsDir, 'fatecore-v0.2-prod-metrics.json')
   const metrics = loadJson(metricsPath, {})
   const schema = latestFeatureSchema(fatecoreDir) || {}
   const featuresUsed =
@@ -149,7 +154,7 @@ export function loadFateCore(opts = {}) {
   }
 
   return {
-    version: 'fatecore-v0.3',
+    version: 'fatecore-v0.2-prod',
     weightsDir,
     featureNames: featuresUsed,
     metrics,
