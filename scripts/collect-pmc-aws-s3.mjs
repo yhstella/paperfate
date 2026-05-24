@@ -1,26 +1,30 @@
 #!/usr/bin/env node
-// PaperFate · PMC AWS S3 Open Data harvester
+// PaperFate PMC AWS S3 Open Data harvester.
 //
 // NCBI mirrors the PMC Open Access subset on AWS S3:
 //   https://pmc-oa-opendata.s3.amazonaws.com/{PMCID}.{ver}/{PMCID}.{ver}.xml
 //
-// AWS S3 is dramatically faster and more reliable than ftp.ncbi.nlm.nih.gov
-// (which from this network averages ~25 KB/s with TLS resets).
-//
 // Strategy:
-//   * Reads PMCIDs from paperfate.db without pmc_body_word_count
-//   * Tries versions 1..3 (most papers are .1; amendments bump version)
-//   * 20-way parallel fetch + 10/s polite rate
-//   * Parses JATS XML into the same shape as collect-pmc-fulltext.mjs
-//   * Output: data/pmc-fulltext/aws-s3-{date}.jsonl (auto-ingested via ingestPmcFulltext)
+//   * Reads PMCIDs from paperfate.db without pmc_body_word_count.
+//   * Tries versions 1..MAX_VERSION, usually .1.
+//   * Parallel fetch with a process-wide polite rate limiter.
+//   * Parses JATS XML into the same shape as collect-pmc-fulltext.mjs.
+//   * Appends JSONL to data/pmc-fulltext/aws-s3-{date}.jsonl.
 //
 // Usage:
-//   node scripts/collect-pmc-aws-s3.mjs [--parallel=20] [--rps=15] [--limit=N]
+//   node --expose-gc scripts/collect-pmc-aws-s3.mjs --parallel=20 --rps=20
 
 import Database from 'better-sqlite3'
 import {
-  appendFileSync, createReadStream, existsSync, mkdirSync,
-  readdirSync, statSync,
+  closeSync,
+  createReadStream,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  statSync,
+  writeSync,
 } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
@@ -46,26 +50,73 @@ const PARALLEL = Number(arg('parallel', '20'))
 const RPS = Number(arg('rps', '15'))
 const LIMIT = Number(arg('limit', '0'))
 const MAX_VERSION = Number(arg('max-version', '3'))
+const HEARTBEAT_SEC = Number(arg('heartbeat-sec', '300'))
+const GC_SEC = Number(arg('gc-sec', '60'))
+const FSYNC_EVERY = Number(arg('fsync-every', '500'))
 
 function pad(n) { return String(n).padStart(2, '0') }
-function todayStamp() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-function decodeEntities(s) { return String(s ?? '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'") }
-function stripTags(s) { return String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() }
+function todayStamp() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+function timeStamp() {
+  const d = new Date()
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
+function decodeEntities(s) {
+  return String(s ?? '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+}
+function stripTags(s) {
+  return String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
 
 mkdirSync(OUT_DIR, { recursive: true })
 const OUT_PATH = join(OUT_DIR, `aws-s3-${todayStamp()}.jsonl`)
+const OUT_FD = openSync(OUT_PATH, 'a')
+let writesSinceFsync = 0
+let shutdownRequested = false
+
+function logError(prefix, e) {
+  console.error(`[${prefix} ${new Date().toISOString()}]`, e?.stack || e)
+}
+
+process.on('unhandledRejection', e => {
+  logError('UNHANDLED', e)
+})
+
+process.on('uncaughtException', e => {
+  logError('UNCAUGHT', e)
+})
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    console.error(`[${sig} ${new Date().toISOString()}] graceful shutdown requested`)
+    shutdownRequested = true
+  })
+}
 
 class TokenBucket {
-  constructor(rps) { this.rps = rps; this.tokens = rps; this.last = Date.now() }
+  constructor(rps) {
+    this.gapMs = Math.max(1, 1000 / Math.max(1, rps))
+    this.nextAt = 0
+    this.chain = Promise.resolve()
+  }
+
   async take() {
-    while (true) {
-      const now = Date.now()
-      this.tokens = Math.min(this.rps, this.tokens + (now - this.last) * this.rps / 1000)
-      this.last = now
-      if (this.tokens >= 1) { this.tokens--; return }
-      await sleep(50)
-    }
+    const prior = this.chain
+    let release
+    this.chain = new Promise(resolve => { release = resolve })
+    await prior
+    const wait = Math.max(0, this.nextAt - Date.now())
+    if (wait) await sleep(wait)
+    this.nextAt = Date.now() + this.gapMs
+    release()
   }
 }
 
@@ -74,7 +125,10 @@ async function loadAlreadyDone() {
   for (const name of readdirSync(OUT_DIR)) {
     if (!name.endsWith('.jsonl') || name.startsWith('_')) continue
     const p = join(OUT_DIR, name)
-    const rl = createInterface({ input: createReadStream(p, { encoding: 'utf8' }), crlfDelay: Infinity })
+    const rl = createInterface({
+      input: createReadStream(p, { encoding: 'utf8' }),
+      crlfDelay: Infinity,
+    })
     for await (const line of rl) {
       if (!line.trim()) continue
       const m = line.match(/"pmcid"\s*:\s*"([^"]+)"/)
@@ -89,24 +143,33 @@ function loadQueue(done) {
   console.log('Querying DB for PMCIDs without pmc_body_word_count...')
   const db = new Database(DB_PATH, { readonly: true, fileMustExist: true })
   db.pragma('query_only = ON')
+  db.pragma('busy_timeout = 60000')
+
   const rows = db.prepare(`
     SELECT doi, pmid, pmcid
     FROM papers
     WHERE pmcid IS NOT NULL AND pmcid != ''
       AND (pmc_body_word_count IS NULL OR pmc_body_word_count <= 0)
     ORDER BY pmcid
-  `).all()
-  db.close()
+  `).iterate()
+
   const queue = []
+  let candidates = 0
   let skipped = 0
   for (const r of rows) {
+    candidates++
     const pmcid = String(r.pmcid).toUpperCase()
     if (!pmcid.startsWith('PMC')) continue
-    if (done.has(pmcid)) { skipped++; continue }
+    if (done.has(pmcid)) {
+      skipped++
+      continue
+    }
     queue.push({ doi: r.doi || null, pmid: r.pmid || null, pmcid })
     if (LIMIT > 0 && queue.length >= LIMIT) break
   }
-  console.log(`  candidates ${rows.length.toLocaleString()}  skipped(already-done) ${skipped.toLocaleString()}  queued ${queue.length.toLocaleString()}`)
+  db.close()
+
+  console.log(`  candidates ${candidates.toLocaleString()}  skipped(already-done) ${skipped.toLocaleString()}  queued ${queue.length.toLocaleString()}`)
   return queue
 }
 
@@ -120,9 +183,8 @@ async function fetchXml(pmcid, limiter) {
         const txt = await res.text()
         if (txt.length > 200) return { xml: txt, version: ver }
       }
-      // 404 or empty: try next version
-    } catch {
-      // network error: retry next version
+    } catch (e) {
+      logError(`FETCH ${pmcid} v${ver}`, e)
     }
   }
   return null
@@ -138,9 +200,11 @@ function parseJats(xml) {
   const title = titleRaw ? stripTags(decodeEntities(titleRaw)) : null
   const absBlock = article.match(/<abstract[^>]*>([\s\S]*?)<\/abstract>/)?.[1]
   const abstract = absBlock ? stripTags(decodeEntities(absBlock)) : null
-  const bodyBlock = article.match(/<body>([\s\S]*?)<\/body>/)?.[1] || ''
+  const bodyBlock = article.match(/<body\b[^>]*>([\s\S]*?)<\/body>/)?.[1] || ''
   const sections = []
-  let methodsText = '', resultsText = '', discussionText = ''
+  let methodsText = ''
+  let resultsText = ''
+  let discussionText = ''
   const secRe = /<sec[^>]*>([\s\S]*?)<\/sec>/g
   let sm
   while ((sm = secRe.exec(bodyBlock)) !== null) {
@@ -168,7 +232,9 @@ function parseJats(xml) {
   }
   const dataAvail = stripTags(decodeEntities(article.match(/<sec[^>]*sec-type="[^"]*data[\s\S]*?<\/sec>/i)?.[0] || '')).slice(0, 400) || null
   return {
-    pmid, doi, title,
+    pmid,
+    doi,
+    title,
     abstract_full: abstract,
     section_count: sections.length,
     sections,
@@ -185,57 +251,140 @@ function parseJats(xml) {
   }
 }
 
-async function worker(queue, limiter, counters) {
-  while (queue.length) {
-    const item = queue.shift()
-    if (!item) break
-    try {
-      const res = await fetchXml(item.pmcid, limiter)
-      if (!res) {
-        counters.miss++
-      } else {
-        const parsed = parseJats(res.xml)
-        if (parsed.body_word_count > 100) {
-          appendFileSync(OUT_PATH, JSON.stringify({
-            pmcid: item.pmcid,
-            source: 'pmc_aws_s3',
-            version: res.version,
-            ...parsed,
-            fetched_at: new Date().toISOString(),
-          }) + '\n')
-          counters.ok++
-        } else {
-          counters.short++
-        }
-      }
-    } catch {
-      counters.fail++
-    }
-    counters.done++
-    if (counters.done % 250 === 0) {
-      const elapsed = (Date.now() - counters.t0) / 1000
-      const rate = (counters.done / Math.max(1, elapsed)).toFixed(1)
-      const eta = ((counters.total - counters.done) / Math.max(1, rate) / 60).toFixed(0)
-      console.log(`  ${counters.done.toLocaleString()}/${counters.total.toLocaleString()} ok=${counters.ok.toLocaleString()} miss=${counters.miss.toLocaleString()} short=${counters.short} fail=${counters.fail} ${rate}/s eta=${eta}m`)
-    }
+function appendJsonl(row) {
+  writeSync(OUT_FD, JSON.stringify(row) + '\n')
+  writesSinceFsync++
+  if (FSYNC_EVERY > 0 && writesSinceFsync >= FSYNC_EVERY) {
+    fsyncSync(OUT_FD)
+    writesSinceFsync = 0
   }
 }
 
+function progressLine(queue, counters, prefix = '  ') {
+  const elapsed = (Date.now() - counters.t0) / 1000
+  const rateNum = counters.done / Math.max(1, elapsed)
+  const rate = rateNum.toFixed(1)
+  const eta = ((counters.total - counters.done) / Math.max(0.001, rateNum) / 60).toFixed(0)
+  return `${prefix}${counters.done.toLocaleString()}/${counters.total.toLocaleString()} queue=${queue.length.toLocaleString()} ok=${counters.ok.toLocaleString()} miss=${counters.miss.toLocaleString()} short=${counters.short} fail=${counters.fail} worker_fail=${counters.worker_fail} ${rate}/s eta=${eta}m`
+}
+
+async function worker(workerId, queue, limiter, counters) {
+  try {
+    while (queue.length && !shutdownRequested) {
+      const item = queue.shift()
+      if (!item) break
+      try {
+        const res = await fetchXml(item.pmcid, limiter)
+        if (!res) {
+          counters.miss++
+        } else {
+          const parsed = parseJats(res.xml)
+          if (parsed.body_word_count > 100) {
+            appendJsonl({
+              pmcid: item.pmcid,
+              source: 'pmc_aws_s3',
+              version: res.version,
+              ...parsed,
+              fetched_at: new Date().toISOString(),
+            })
+            counters.ok++
+          } else {
+            counters.short++
+          }
+        }
+      } catch (e) {
+        counters.fail++
+        logError(`WORKER ${workerId} ITEM ${item?.pmcid || 'unknown'}`, e)
+      }
+      counters.done++
+      if (counters.done % 250 === 0) console.log(progressLine(queue, counters))
+    }
+  } catch (e) {
+    counters.worker_fail++
+    logError(`WORKER ${workerId} FATAL`, e)
+  }
+}
+
+function startHeartbeat(queue, counters) {
+  if (HEARTBEAT_SEC <= 0) return null
+  const timer = setInterval(() => {
+    const mem = process.memoryUsage()
+    const rss = (mem.rss / 1024 / 1024).toFixed(0)
+    const heap = (mem.heapUsed / 1024 / 1024).toFixed(0)
+    console.log(`[HEARTBEAT ${timeStamp()}] ${progressLine(queue, counters, '')} rss=${rss}MB heap=${heap}MB`)
+  }, HEARTBEAT_SEC * 1000)
+  timer.unref?.()
+  return timer
+}
+
+function startGcTimer() {
+  if (GC_SEC <= 0 || typeof global.gc !== 'function') return null
+  const timer = setInterval(() => {
+    try {
+      global.gc()
+      console.log(`[GC ${timeStamp()}] explicit global.gc() completed`)
+    } catch (e) {
+      logError('GC', e)
+    }
+  }, GC_SEC * 1000)
+  timer.unref?.()
+  return timer
+}
+
 async function main() {
-  console.log('PaperFate · PMC AWS S3 harvester')
+  console.log('PaperFate PMC AWS S3 harvester')
   console.log(`DB: ${DB_PATH}`)
   console.log(`Output: ${OUT_PATH}`)
-  console.log(`Args: parallel=${PARALLEL} rps=${RPS} limit=${LIMIT || 'none'} max_version=${MAX_VERSION}`)
+  console.log(`Args: parallel=${PARALLEL} rps=${RPS} limit=${LIMIT || 'none'} max_version=${MAX_VERSION} heartbeat_sec=${HEARTBEAT_SEC} gc_sec=${GC_SEC} fsync_every=${FSYNC_EVERY}`)
+  console.log(`GC: ${typeof global.gc === 'function' ? 'available' : 'not available; run node with --expose-gc for explicit GC'}`)
   console.log('')
+
   const done = await loadAlreadyDone()
   const queue = loadQueue(done)
-  if (queue.length === 0) { console.log('nothing to do'); return }
+  if (queue.length === 0) {
+    console.log('nothing to do')
+    return
+  }
+
   const limiter = new TokenBucket(RPS)
-  const counters = { done: 0, ok: 0, miss: 0, short: 0, fail: 0, total: queue.length, t0: Date.now() }
-  await Promise.all(Array.from({ length: PARALLEL }, () => worker(queue, limiter, counters)))
+  const counters = {
+    done: 0,
+    ok: 0,
+    miss: 0,
+    short: 0,
+    fail: 0,
+    worker_fail: 0,
+    total: queue.length,
+    t0: Date.now(),
+  }
+  const heartbeat = startHeartbeat(queue, counters)
+  const gcTimer = startGcTimer()
+  const settled = await Promise.allSettled(
+    Array.from({ length: PARALLEL }, (_, i) => worker(i + 1, queue, limiter, counters)),
+  )
+
+  heartbeat && clearInterval(heartbeat)
+  gcTimer && clearInterval(gcTimer)
+  for (const [i, result] of settled.entries()) {
+    if (result.status === 'rejected') logError(`WORKER_PROMISE ${i + 1}`, result.reason)
+  }
+  if (writesSinceFsync > 0) fsyncSync(OUT_FD)
+
   console.log(`\nDone in ${((Date.now() - counters.t0) / 60000).toFixed(1)} min`)
-  console.log(`ok=${counters.ok.toLocaleString()}  miss=${counters.miss.toLocaleString()}  short=${counters.short}  fail=${counters.fail}`)
+  console.log(`ok=${counters.ok.toLocaleString()}  miss=${counters.miss.toLocaleString()}  short=${counters.short}  fail=${counters.fail}  worker_fail=${counters.worker_fail}`)
   if (existsSync(OUT_PATH)) console.log(`output: ${OUT_PATH} (${(statSync(OUT_PATH).size / 1024 / 1024).toFixed(1)} MB)`)
 }
 
-main().catch(e => { console.error(e); process.exit(1) })
+main()
+  .catch(e => {
+    logError('MAIN', e)
+    process.exitCode = 1
+  })
+  .finally(() => {
+    try {
+      if (writesSinceFsync > 0) fsyncSync(OUT_FD)
+      closeSync(OUT_FD)
+    } catch (e) {
+      logError('CLOSE', e)
+    }
+  })
