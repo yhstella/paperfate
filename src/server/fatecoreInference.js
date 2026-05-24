@@ -19,6 +19,14 @@ const TARGETS = [
   { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.2-prod-y_icite_rcr.txt' },
   { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.2-prod-y_citations_log.txt' },
 ]
+
+function targetFilesForVersion(versionTag) {
+  return TARGETS.map(target => ({
+    ...target,
+    file: `fatecore-${versionTag}-${target.label}.txt`,
+  }))
+}
+
 // ROLLBACK 2026-05-24: v0.3 deployed with severe data leakage (icite_citation_count,
 // citations_openalex, fwci, pmc_body_word_count are post-publication features that
 // don't exist for cold-start submissions). R²=0.9525 was test-set illusion — real
@@ -136,7 +144,9 @@ function latestFeatureSchema(fatecoreDir) {
 export function loadFateCore(opts = {}) {
   const weightsDir = opts.weightsDir || process.env.FATECORE_WEIGHTS_DIR || DEFAULT_WEIGHTS_DIR
   const fatecoreDir = opts.fatecoreDir || process.env.FATECORE_DATA_DIR || DEFAULT_FATECORE_DIR
-  const metricsPath = join(weightsDir, 'fatecore-v0.2-prod-metrics.json')
+  const versionTag = opts.versionTag || process.env.FATECORE_VERSION || 'v0.2-prod'
+  const targets = targetFilesForVersion(versionTag)
+  const metricsPath = join(weightsDir, `fatecore-${versionTag}-metrics.json`)
   const metrics = loadJson(metricsPath, {})
   const schema = latestFeatureSchema(fatecoreDir) || {}
   const featuresUsed =
@@ -147,20 +157,21 @@ export function loadFateCore(opts = {}) {
     []
 
   const models = {}
-  for (const target of TARGETS) {
+  for (const target of targets) {
     const path = join(weightsDir, target.file)
     if (!existsSync(path)) continue
     models[target.key] = parseLightGbmModel(readFileSync(path, 'utf8'))
   }
 
   return {
-    version: 'fatecore-v0.2-prod',
+    version: `fatecore-${versionTag}`,
     weightsDir,
+    targets,
     featureNames: featuresUsed,
     metrics,
     models,
     loadedTargets: Object.keys(models),
-    missingTargets: TARGETS.map(t => t.key).filter(k => !models[k]),
+    missingTargets: targets.map(t => t.key).filter(k => !models[k]),
   }
 }
 
@@ -430,7 +441,7 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
   const predictions = {}
   let modelTargets = 0
 
-  for (const target of TARGETS) {
+  for (const target of (model.targets || TARGETS)) {
     const lgb = model.models[target.key]
     if (!lgb) continue
     const raw = predictLightGbm(lgb, vector)
