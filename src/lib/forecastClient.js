@@ -7,6 +7,28 @@ import { simulate as mockSimulate } from './mockEngine.js'
 const API_PATH = '/api/forecast'
 const SIMILAR_PATH = '/api/similar'
 const JOURNAL_INFO_PATH = '/api/journal-info'
+const REFERENCES_PATH = '/api/references'
+
+export async function fetchReferencesSummary(dois, { signal } = {}) {
+  const clean = Array.isArray(dois)
+    ? [...new Set(dois.map(s => String(s || '').trim().toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '').replace(/^doi:\s*/, ''))
+        .filter(d => /^10\./.test(d)))]
+    : []
+  if (!clean.length) return null
+  try {
+    const res = await fetch(REFERENCES_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dois: clean.slice(0, 50) }),
+      signal,
+    })
+    if (!res.ok) throw new Error(`/api/references HTTP ${res.status}`)
+    return await res.json()
+  } catch (err) {
+    console.warn('fetchReferencesSummary failed:', err.message)
+    return null
+  }
+}
 
 export async function fetchJournalInfo(queryRaw, { signal } = {}) {
   const q = String(queryRaw || '').trim()

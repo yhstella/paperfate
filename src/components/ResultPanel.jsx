@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -68,6 +68,44 @@ export default function ResultPanel({ result, input }) {
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             Prior-year IF is the journal's published Journal Citation Reports score from the year before. Use it to anchor expectations; PaperFate's manuscript-level forecast above is independent of this number.
+          </div>
+        </div>
+      )}
+
+      {referencesSummary && referencesSummary.n_resolved > 0 && (
+        <div className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Your bibliography</div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="text-sm text-slate-200">
+              {referencesSummary.n_resolved}/{referencesSummary.n_input} references resolved
+            </span>
+            {Number.isFinite(referencesSummary.median_jif) && <span className="chip">median IF {referencesSummary.median_jif}</span>}
+            {Number.isFinite(referencesSummary.mean_jif) && <span className="chip">mean IF {referencesSummary.mean_jif}</span>}
+            {referencesSummary.year_median && (
+              <span className="chip">years {referencesSummary.year_min}–{referencesSummary.year_max} · median {referencesSummary.year_median}</span>
+            )}
+          </div>
+          {referencesSummary.top_journals?.length > 0 && (
+            <div className="mt-2 text-xs text-slate-400">
+              <span className="font-medium text-slate-300">Top venues: </span>
+              {referencesSummary.top_journals.slice(0, 5).map((j, i) => (
+                <span key={j.name}>
+                  {i > 0 && ' · '}
+                  {j.name} ({j.count}{Number.isFinite(j.jif) ? `, IF ${j.jif}` : ''})
+                </span>
+              ))}
+            </div>
+          )}
+          {referencesSummary.top_categories?.length > 0 && (
+            <div className="mt-1 text-xs text-slate-400">
+              <span className="font-medium text-slate-300">Top categories: </span>
+              {referencesSummary.top_categories.slice(0, 3).map((c, i) => (
+                <span key={c.category}>{i > 0 && ' · '}{c.category} ({c.count})</span>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 text-[11px] text-slate-500">
+            Descriptive only — your bibliography's tier helps you sanity-check whether the journey above matches the literature you're already citing.
           </div>
         </div>
       )}

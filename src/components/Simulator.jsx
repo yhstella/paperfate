@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { forecast, fetchSimilar, fetchJournalInfo } from '../lib/forecastClient.js'
+import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
@@ -99,6 +99,7 @@ export default function Simulator() {
   const [result, setResult] = useState(null)
 
   const [targetJournalInput, setTargetJournalInput] = useState('')
+  const [referencesInput, setReferencesInput] = useState('')
 
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
@@ -145,12 +146,23 @@ export default function Simulator() {
       // Local dev (Vite preview has no /api): falls back to local mock engine
       // so the demo still works while you iterate on the UI.
       const tjQuery = targetJournalInput.trim()
-      const [r, similars, targetJournalInfo] = await Promise.all([
+      const refDois = referencesInput
+        .split(/[\s,;\r\n]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+        .slice(0, 50)
+      const [r, similars, targetJournalInfo, referencesSummary] = await Promise.all([
         forecast(input, { fallbackMock: true }),
         fetchSimilar({ title, abstract: text }),
         tjQuery ? fetchJournalInfo(tjQuery) : Promise.resolve(null),
+        refDois.length ? fetchReferencesSummary(refDois) : Promise.resolve(null),
       ])
-      setResult({ ...r, similar_papers: similars, target_journal_info: targetJournalInfo })
+      setResult({
+        ...r,
+        similar_papers: similars,
+        target_journal_info: targetJournalInfo,
+        references_summary: referencesSummary,
+      })
       setStatus('done')
       setTimeout(() => {
         document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -254,6 +266,19 @@ export default function Simulator() {
               </div>
             </Field>
 
+            <Field label="Reference DOIs (optional, one per line)">
+              <textarea
+                value={referencesInput}
+                onChange={e => setReferencesInput(e.target.value)}
+                rows={3}
+                placeholder="10.1056/NEJMoa1504720&#10;10.1016/S0140-6736(18)32590-X"
+                className="input resize-y"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                Up to 50 DOIs. Each is resolved through OpenAlex to surface the median impact factor, top journals, and field distribution of your bibliography.
+              </div>
+            </Field>
+
             <DetectedPanel
               meta={meta}
               overrides={overrides}
@@ -325,6 +350,7 @@ function resultLegacyShape(r) {
       citations: s.citations ?? 0,
     })),
     targetJournal: r.target_journal_info || null,
+    referencesSummary: r.references_summary || null,
     journey: r.journey || [],
   }
 }
