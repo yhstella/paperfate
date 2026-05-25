@@ -292,7 +292,7 @@ function resultLegacyShape(r) {
     score: r.overall_score ?? null,
     tier: jifToTier(p.jcr_jif, r.journey),
     deskReject: deskRejectFormat(p.desk_reject_risk),
-    timeline: timelineFromTier(p.jcr_jif),
+    timeline: timelineFromPrediction(p.review_timeline_days, p.jcr_jif),
     citation: citationsFormat(p.citations_5yr, r.overall_score),
     weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
     suggestions: (Array.isArray(r.counterfactual_suggestions) && r.counterfactual_suggestions.length > 0
@@ -352,6 +352,17 @@ function timelineFromTier(j) {
     : pt >= 3 ? '6–10'
     : '4–8'
   return { weeks, note: 'Heuristic estimate from journal tier (v0.1 — not learned)' }
+}
+
+function timelineFromPrediction(t, fallbackJif) {
+  if (!t || !Number.isFinite(t.point)) return timelineFromTier(fallbackJif)
+  const point = Math.max(1, Math.round(t.point / 7))
+  const lo = Math.max(1, Math.round((Number.isFinite(t.ci_low) ? t.ci_low : t.point) / 7))
+  const hi = Math.max(lo, Math.round((Number.isFinite(t.ci_high) ? t.ci_high : t.point) / 7))
+  return {
+    weeks: `${lo}-${hi}`,
+    note: `Learned v0.4 estimate; point ${point} weeks from received to accepted`,
+  }
 }
 
 function citationsFormat(c, score) {

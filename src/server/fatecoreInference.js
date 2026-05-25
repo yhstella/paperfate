@@ -19,6 +19,7 @@ const TARGETS = [
   { key: 'icite_rcr', label: 'y_icite_rcr', file: 'fatecore-v0.2-prod-y_icite_rcr.txt' },
   { key: 'citations_5yr', label: 'y_citations_log', file: 'fatecore-v0.2-prod-y_citations_log.txt' },
 ]
+const TIMELINE_VERSION = 'v0.4-timeline'
 
 function targetFilesForVersion(versionTag) {
   return TARGETS.map(target => ({
@@ -172,6 +173,21 @@ export function loadFateCore(opts = {}) {
     models,
     loadedTargets: Object.keys(models),
     missingTargets: targets.map(t => t.key).filter(k => !models[k]),
+  }
+}
+
+export function loadTimelineModel(opts = {}) {
+  const weightsDir = opts.weightsDir || process.env.FATECORE_WEIGHTS_DIR || DEFAULT_WEIGHTS_DIR
+  const versionTag = opts.timelineVersionTag || process.env.FATECORE_TIMELINE_VERSION || TIMELINE_VERSION
+  const metricsPath = join(weightsDir, `fatecore-${versionTag}-metrics.json`)
+  const modelPath = join(weightsDir, `fatecore-${versionTag}-review_days.txt`)
+  if (!existsSync(metricsPath) || !existsSync(modelPath)) return null
+  const metrics = loadJson(metricsPath, {})
+  return {
+    version: `fatecore-${versionTag}`,
+    featureNames: metrics.feature_cols || [],
+    metrics,
+    model: parseLightGbmModel(readFileSync(modelPath, 'utf8')),
   }
 }
 
@@ -435,6 +451,19 @@ function calibratedInterval(cal, target) {
   return interval(cal.point, cal.radius, 0, hi)
 }
 
+function calibratedTimelineInterval(raw, timelineModel) {
+  const metrics = timelineModel?.metrics || {}
+  const pointLog = interpolateIso(raw, metrics.iso_x, metrics.iso_y)
+  const radius = Number(metrics.conformal_q_log)
+  const q = Number.isFinite(radius) ? radius : 0.9
+  const toDays = (x) => clamp(Math.expm1(x), 1, 730)
+  return {
+    point: +toDays(pointLog).toFixed(1),
+    ci_low: +toDays(pointLog - q).toFixed(1),
+    ci_high: +toDays(pointLog + q).toFixed(1),
+  }
+}
+
 export function predictFromExtraction(manuscript, extraction, opts = {}) {
   const model = opts.model || loadFateCore(opts)
   const { vector } = buildFeatureVector(manuscript, extraction, model, opts)
@@ -455,6 +484,17 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
     if (!predictions[k]) predictions[k] = v
   }
   if (!predictions.desk_reject_risk) predictions.desk_reject_risk = fallback.desk_reject_risk
+
+  const timelineModel = opts.timelineModel === false
+    ? null
+    : (opts.timelineModel || loadTimelineModel(opts))
+  let timelineLoaded = false
+  if (timelineModel?.model && timelineModel.featureNames?.length) {
+    const { vector: timelineVector } = buildFeatureVector(manuscript, extraction, timelineModel, opts)
+    const rawTimeline = predictLightGbm(timelineModel.model, timelineVector)
+    predictions.review_timeline_days = calibratedTimelineInterval(rawTimeline, timelineModel)
+    timelineLoaded = true
+  }
 
   const domain = domainScores(extraction)
   const q = quality01(extraction)
@@ -477,6 +517,7 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
       model_status: modelTargets ? 'loaded' : 'heuristic_fallback',
       loaded_targets: model.loadedTargets,
       missing_targets: model.missingTargets,
+      timeline_model: timelineLoaded ? timelineModel.version : 'not_loaded',
       feature_count: model.featureNames.length,
     },
   }

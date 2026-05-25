@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS papers (
   authors_json                 TEXT,
   first_affiliation            TEXT,
   seeds_json                   TEXT,
+  history_received_date        TEXT,
+  history_accepted_date        TEXT,
+  history_epublish_date        TEXT,
+  history_pubmed_date          TEXT,
+  history_revised_date         TEXT,
+  review_days_received_to_accepted INTEGER,
   -- OpenAlex
   openalex_id                  TEXT,
   citations_openalex           INTEGER,
@@ -103,6 +109,8 @@ CREATE TABLE IF NOT EXISTS papers (
 CREATE INDEX IF NOT EXISTS idx_pmid       ON papers(pmid);
 CREATE INDEX IF NOT EXISTS idx_pmcid      ON papers(pmcid);
 CREATE INDEX IF NOT EXISTS idx_year       ON papers(year);
+CREATE INDEX IF NOT EXISTS idx_history_received ON papers(history_received_date);
+CREATE INDEX IF NOT EXISTS idx_review_days_received_to_accepted ON papers(review_days_received_to_accepted);
 CREATE INDEX IF NOT EXISTS idx_journal    ON papers(journal);
 CREATE INDEX IF NOT EXISTS idx_oa_cit     ON papers(citations_openalex);
 CREATE INDEX IF NOT EXISTS idx_s2_cit     ON papers(citations_s2);
@@ -260,6 +268,21 @@ function migrateAddMissingColumns(db) {
     ['jif_5yr_quartile',       'TEXT'],
     ['jcr_edition',            'TEXT'],
   ])
+  // PubMed publication history dates (2026-05-25)
+  addColumns('papers', [
+    ['history_received_date',                 'TEXT'],
+    ['history_accepted_date',                 'TEXT'],
+    ['history_epublish_date',                 'TEXT'],
+    ['history_pubmed_date',                   'TEXT'],
+    ['history_revised_date',                  'TEXT'],
+    ['review_days_received_to_accepted',      'INTEGER'],
+  ])
+  if (tableExists('papers')) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_history_received ON papers(history_received_date);
+      CREATE INDEX IF NOT EXISTS idx_review_days_received_to_accepted ON papers(review_days_received_to_accepted);
+    `)
+  }
   // iCite (NIH-curated citation metrics, 2026-05-21)
   addColumns('papers', [
     ['icite_rcr',                      'REAL'],
@@ -500,6 +523,37 @@ function median(values) {
   return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2
 }
 
+function normalizeIsoDate(value) {
+  if (value === null || value === undefined) return null
+  const s = String(value).trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
+}
+
+function daysBetweenIsoDates(start, end) {
+  if (!start || !end) return null
+  const a = Date.parse(`${start}T00:00:00Z`)
+  const b = Date.parse(`${end}T00:00:00Z`)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  const days = Math.round((b - a) / 86400000)
+  return days > 0 && days <= 3650 ? days : null
+}
+
+function historyFields(history = {}) {
+  const received = normalizeIsoDate(history.received)
+  const accepted = normalizeIsoDate(history.accepted)
+  const epublish = normalizeIsoDate(history.epublish || history.aheadofprint)
+  const pubmed = normalizeIsoDate(history.pubmed)
+  const revised = normalizeIsoDate(history.revised)
+  return {
+    history_received_date: received,
+    history_accepted_date: accepted,
+    history_epublish_date: epublish,
+    history_pubmed_date: pubmed,
+    history_revised_date: revised,
+    review_days_received_to_accepted: daysBetweenIsoDates(received, accepted),
+  }
+}
+
 // ────────────────── PubMed ingestion ──────────────────
 function ingestPubMed(db) {
   const files = listJsonl('pubmed')
@@ -508,11 +562,17 @@ function ingestPubMed(db) {
     INSERT INTO papers (
       doi, pmid, title, abstract, journal, issn, year,
       publication_types_json, mesh_terms_json, authors_json, first_affiliation,
-      seeds_json, fetched_pubmed_at
+      seeds_json,
+      history_received_date, history_accepted_date, history_epublish_date,
+      history_pubmed_date, history_revised_date, review_days_received_to_accepted,
+      fetched_pubmed_at
     ) VALUES (
       @doi, @pmid, @title, @abstract, @journal, @issn, @year,
       @publication_types_json, @mesh_terms_json, @authors_json, @first_affiliation,
-      @seeds_json, @fetched_pubmed_at
+      @seeds_json,
+      @history_received_date, @history_accepted_date, @history_epublish_date,
+      @history_pubmed_date, @history_revised_date, @review_days_received_to_accepted,
+      @fetched_pubmed_at
     )
     ON CONFLICT(doi) DO UPDATE SET
       pmid = COALESCE(excluded.pmid, pmid),
@@ -526,6 +586,12 @@ function ingestPubMed(db) {
       authors_json = excluded.authors_json,
       first_affiliation = COALESCE(excluded.first_affiliation, first_affiliation),
       seeds_json = excluded.seeds_json,
+      history_received_date = COALESCE(excluded.history_received_date, history_received_date),
+      history_accepted_date = COALESCE(excluded.history_accepted_date, history_accepted_date),
+      history_epublish_date = COALESCE(excluded.history_epublish_date, history_epublish_date),
+      history_pubmed_date = COALESCE(excluded.history_pubmed_date, history_pubmed_date),
+      history_revised_date = COALESCE(excluded.history_revised_date, history_revised_date),
+      review_days_received_to_accepted = COALESCE(excluded.review_days_received_to_accepted, review_days_received_to_accepted),
       fetched_pubmed_at = excluded.fetched_pubmed_at
   `)
   for (const f of files) {
@@ -544,6 +610,7 @@ function ingestPubMed(db) {
       for (const rec of readJsonl(f)) {
         if (!rec.doi) continue
         const doi = String(rec.doi).toLowerCase()
+        const hist = historyFields(rec.history || {})
         upsert.run({
           doi,
           pmid: rec.pmid || null,
@@ -557,6 +624,7 @@ function ingestPubMed(db) {
           authors_json: JSON.stringify(rec.authors || []),
           first_affiliation: rec.firstAffiliation || null,
           seeds_json: JSON.stringify([...seedOfPaper[doi]]),
+          ...hist,
           fetched_pubmed_at: rec.fetched_at || startedAt,
         })
         up++
