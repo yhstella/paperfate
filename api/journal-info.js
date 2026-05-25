@@ -1,0 +1,108 @@
+// PaperFate · GET /api/journal-info?issn=... or ?name=...
+//
+// Returns a fact-based snapshot for a single target journal:
+//   { issn, name, jif, jif_5yr, tier, category, publisher, country, is_oa,
+//     is_in_doaj, apc, h_index }
+//
+// Backed by the 800-journal shortlist already shipped under weights/.
+// Per Codex Round 5 Task 2 diagnosis (v0.3-pub target-aware path was
+// trivial j_hist_jcr_jif autocorrelation), this endpoint provides a
+// direct prior-year JIF lookup so the UI can render an explicit
+// "if you submit to {journal}, prior-year IF was X" card without
+// deploying a leak-prone target-aware model.
+//
+// Match priority:
+//   1. ?issn= exact (case-insensitive, hyphen-tolerant)
+//   2. ?name= exact (lowercase comparison)
+//   3. ?name= substring (returns highest-JIF match)
+
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const ROOT = join(HERE, '..')
+const SHORTLIST_PATH = join(ROOT, 'weights', 'journals-shortlist.json')
+
+export const config = { maxDuration: 10, runtime: 'nodejs' }
+
+const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180')
+  .split(',').map(s => s.trim())
+
+function corsHeaders(origin) {
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
+  }
+}
+
+let _journals = null
+function loadJournals() {
+  if (_journals) return _journals
+  if (!existsSync(SHORTLIST_PATH)) { _journals = []; return _journals }
+  try {
+    const data = JSON.parse(readFileSync(SHORTLIST_PATH, 'utf-8'))
+    _journals = data.journals || []
+  } catch { _journals = [] }
+  return _journals
+}
+
+function normalizeIssn(s) {
+  return String(s || '').replace(/[^0-9xX]/gi, '').toUpperCase()
+}
+
+function shape(j) {
+  return {
+    name: j.name,
+    issn: j.issn || null,
+    jif: Number.isFinite(+j.jif) ? +j.jif : null,
+    jif_5yr: Number.isFinite(+j.jif_5yr) ? +j.jif_5yr : null,
+    tier: j.tier || null,
+    category: j.category || null,
+    quartile: j.quartile || null,
+    publisher: j.publisher || null,
+    country: j.country || null,
+    is_oa: !!j.is_oa,
+    is_in_doaj: !!j.is_in_doaj,
+    apc: j.apc != null ? j.apc : null,
+    h_index: j.h_index != null ? j.h_index : null,
+  }
+}
+
+export default function handler(req, res) {
+  const origin = req.headers.origin || ''
+  for (const [k, v] of Object.entries(corsHeaders(origin))) res.setHeader(k, v)
+  if (req.method === 'OPTIONS') return res.status(204).end()
+  if (req.method !== 'GET') return res.status(405).json({ error: 'method_not_allowed' })
+
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+  const issnRaw = url.searchParams.get('issn')
+  const nameRaw = url.searchParams.get('name')
+
+  const journals = loadJournals()
+  let hit = null
+
+  if (issnRaw) {
+    const want = normalizeIssn(issnRaw)
+    hit = journals.find(j => normalizeIssn(j.issn) === want) || null
+  }
+  if (!hit && nameRaw) {
+    const wantLower = String(nameRaw).trim().toLowerCase()
+    if (wantLower.length >= 3) {
+      const exact = journals.find(j => String(j.name || '').toLowerCase() === wantLower)
+      if (exact) hit = exact
+      else {
+        const matches = journals
+          .filter(j => String(j.name || '').toLowerCase().includes(wantLower))
+          .sort((a, b) => (+(b.jif || 0)) - (+(a.jif || 0)))
+        hit = matches[0] || null
+      }
+    }
+  }
+
+  if (!hit) return res.status(404).json({ error: 'journal_not_found', query: { issn: issnRaw, name: nameRaw } })
+  return res.status(200).json({ journal: shape(hit) })
+}

@@ -9,6 +9,9 @@
     },
     "api/journals-search.js": {
       "maxDuration": 10
+    },
+    "api/journal-info.js": {
+      "maxDuration": 10
     }
   }
 }
