@@ -29,6 +29,13 @@ export default function ResultPanel({ result, input }) {
         <Card title="Expected review timeline">
           <div className="text-2xl font-semibold">{timeline.weeks} <span className="text-base font-normal text-slate-400">weeks to decision</span></div>
           <div className="mt-1 text-xs text-slate-500">{timeline.note}</div>
+          {fatecoreMeta?.timelineModel && fatecoreMeta.timelineModel !== 'not_loaded' && (
+            <div className="mt-2">
+              <span className="chip border-fate-400/30 text-fate-300/90 bg-fate-400/[0.06] text-[10px]">
+                {fatecoreMeta.timelineModel === 'fatecore-v0.4-timeline' ? 'model v0.4' : fatecoreMeta.timelineModel}
+              </span>
+            </div>
+          )}
         </Card>
 
         <Card title="Citation potential (5y)">
