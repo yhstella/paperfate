@@ -11,3 +11,9 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Regenerable batch payloads + Python caches
+codex-batch.json
+codex-response.json
+scripts/__pycache__/
+__pycache__/

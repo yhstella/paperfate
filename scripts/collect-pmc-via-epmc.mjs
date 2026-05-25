@@ -192,7 +192,7 @@ function parseJats(xml) {
   const title = titleRaw ? stripTags(decodeEntities(titleRaw)) : null
   const absBlock = article.match(/<abstract[^>]*>([\s\S]*?)<\/abstract>/)?.[1]
   const abstract = absBlock ? stripTags(decodeEntities(absBlock)) : null
-  const bodyBlock = article.match(/<body>([\s\S]*?)<\/body>/)?.[1] || ''
+  const bodyBlock = article.match(/<body\b[^>]*>([\s\S]*?)<\/body>/)?.[1] || ''
   const sections = []
   const secRe = /<sec[^>]*>([\s\S]*?)<\/sec>/g
   let sm

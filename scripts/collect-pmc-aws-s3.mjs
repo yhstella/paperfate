@@ -53,6 +53,7 @@ const MAX_VERSION = Number(arg('max-version', '3'))
 const HEARTBEAT_SEC = Number(arg('heartbeat-sec', '300'))
 const GC_SEC = Number(arg('gc-sec', '60'))
 const FSYNC_EVERY = Number(arg('fsync-every', '500'))
+const OA_ONLY = ARGS.includes('--oa-only')
 
 function pad(n) { return String(n).padStart(2, '0') }
 function todayStamp() {
@@ -145,13 +146,18 @@ function loadQueue(done) {
   db.pragma('query_only = ON')
   db.pragma('busy_timeout = 60000')
 
+  const oaFilter = OA_ONLY
+    ? `AND (is_oa = 1 OR unpaywall_is_oa = 1)`
+    : ''
   const rows = db.prepare(`
     SELECT doi, pmid, pmcid
     FROM papers
     WHERE pmcid IS NOT NULL AND pmcid != ''
       AND (pmc_body_word_count IS NULL OR pmc_body_word_count <= 0)
+      ${oaFilter}
     ORDER BY pmcid
   `).iterate()
+  if (OA_ONLY) console.log('  filter: OA-only (is_oa = 1 OR unpaywall_is_oa = 1)')
 
   const queue = []
   let candidates = 0

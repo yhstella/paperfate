@@ -13,7 +13,7 @@
 // - Minimal XML parsing via regex — fine for PubMed's narrow schema.
 // - Resumes nothing on rerun; deletes target file first. Tune RETMAX in seeds.json.
 
-import { readFileSync, mkdirSync, createWriteStream, existsSync, statSync } from 'node:fs'
+import { readFileSync, mkdirSync, createWriteStream, existsSync, statSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -144,6 +144,9 @@ function parsePubMedArticle(xml) {
   const doi = (xml.match(/<ELocationID[^>]*EIdType="doi"[^>]*>([^<]+)<\/ELocationID>/i)
             || xml.match(/<ArticleId[^>]*IdType="doi"[^>]*>([^<]+)<\/ArticleId>/i))?.[1] || ''
 
+  // PMCID (linked PMC full-text identifier, when available)
+  const pmcid = xml.match(/<ArticleId[^>]*IdType="pmc"[^>]*>(PMC\d+)<\/ArticleId>/i)?.[1] || null
+
   // Publication types
   const pubTypes = []
   const ptRe = /<PublicationType[^>]*>([^<]+)<\/PublicationType>/g
@@ -170,8 +173,49 @@ function parsePubMedArticle(xml) {
   // Affiliations — first author affiliation as country/institution hint
   const affil = (xml.match(/<Affiliation>([^<]+)<\/Affiliation>/)?.[1]) || ''
 
+  // Publication history dates (PubMedPubDate PubStatus="received|accepted|epublish|pubmed|entrez|pmc|aheadofprint|revised")
+  // Format ISO YYYY-MM-DD if all parts present, else just YYYY or null.
+  const history = {}
+  const histRe = /<PubMedPubDate\s+PubStatus="([^"]+)"[^>]*>([\s\S]*?)<\/PubMedPubDate>/g
+  let hm
+  while ((hm = histRe.exec(xml)) !== null) {
+    const status = hm[1]
+    const block = hm[2]
+    const y = firstMatch(block, 'Year')
+    const mo = firstMatch(block, 'Month')
+    const d = firstMatch(block, 'Day')
+    if (!y) continue
+    const iso = (y && mo && d) ? `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}` : (y && mo) ? `${y}-${mo.padStart(2,'0')}` : y
+    history[status] = iso
+  }
+  // Trial registry IDs (ClinicalTrials.gov NCT etc.)
+  const databankIds = []
+  const dbRe = /<DataBank>[\s\S]*?<DataBankName>([^<]+)<\/DataBankName>[\s\S]*?<AccessionNumberList>([\s\S]*?)<\/AccessionNumberList>[\s\S]*?<\/DataBank>/g
+  let dm
+  while ((dm = dbRe.exec(xml)) !== null) {
+    const dbName = decodeEntities(dm[1])
+    const acRe = /<AccessionNumber>([^<]+)<\/AccessionNumber>/g
+    let an
+    while ((an = acRe.exec(dm[2])) !== null) {
+      databankIds.push({ db: dbName, id: decodeEntities(an[1]) })
+    }
+  }
+  // Grants / funders
+  const grants = []
+  const grantRe = /<Grant>[\s\S]*?<GrantID>([^<]+)<\/GrantID>(?:[\s\S]*?<Agency>([^<]+)<\/Agency>)?(?:[\s\S]*?<Country>([^<]+)<\/Country>)?[\s\S]*?<\/Grant>/g
+  let gm
+  while ((gm = grantRe.exec(xml)) !== null) {
+    grants.push({
+      id: decodeEntities(gm[1]),
+      agency: gm[2] ? decodeEntities(gm[2]) : null,
+      country: gm[3] ? decodeEntities(gm[3]) : null,
+    })
+    if (grants.length >= 6) break
+  }
+
   return {
     pmid,
+    pmcid,              // PMC full-text identifier (null if not in PMC)
     doi: doi || null,
     title,
     abstract,
@@ -182,6 +226,9 @@ function parsePubMedArticle(xml) {
     meshTerms: meshTerms.slice(0, 20),
     authors,
     firstAffiliation: stripTags(affil) || null,
+    history,            // {received, accepted, epublish, pubmed, ...}
+    databankIds,        // [{db: 'ClinicalTrials.gov', id: 'NCT...'}]
+    grants,             // [{id, agency, country}]
   }
 }
 
@@ -225,9 +272,15 @@ async function collectSeed(key, query, opts) {
 
   mkdirSync(OUT_DIR, { recursive: true })
   const outPath = join(OUT_DIR, `${key}${bucketSuffix}-${todayStamp()}.jsonl`)
-  if (existsSync(outPath)) {
-    console.log(`▷ ${key}${bucketSuffix}: file exists, skipping (delete to refresh)`)
-    return { key, written: 0, path: outPath, skipped: true }
+  // Skip if today's file exists OR any prior-day file exists for this seed×bucket
+  // (avoids re-collection when seeds.json gets new entries while preserving idempotency)
+  const prefix = `${key}${bucketSuffix}-`
+  const existing = readdirSync(OUT_DIR).find(f =>
+    f.startsWith(prefix) && /-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)
+  )
+  if (existing) {
+    console.log(`▷ ${key}${bucketSuffix}: ${existing} exists, skipping (delete to refresh)`)
+    return { key, written: 0, path: join(OUT_DIR, existing), skipped: true }
   }
   const stream = createWriteStream(outPath, { flags: 'w' })
 
@@ -289,9 +342,15 @@ async function main() {
 
   const summary = []
   const startedAt = Date.now()
-  const buckets = seedsCfg._yearBuckets && seedsCfg._yearBuckets.length
-    ? seedsCfg._yearBuckets
-    : [[null, null]]
+  // PFT_YEAR_BUCKETS env override (JSON), e.g. '[[2015,2015],[2016,2016],...]'
+  // — used for one-year-bucket re-collection to fix year-distribution imbalance.
+  const overrideBuckets = process.env.PFT_YEAR_BUCKETS
+    ? JSON.parse(process.env.PFT_YEAR_BUCKETS)
+    : null
+  const buckets = overrideBuckets
+    || (seedsCfg._yearBuckets && seedsCfg._yearBuckets.length
+        ? seedsCfg._yearBuckets
+        : [[null, null]])
   console.log(`Year buckets : ${buckets.map(b => b[0] ? `${b[0]}-${b[1]}` : 'none').join(', ')}`)
   console.log('')
 
