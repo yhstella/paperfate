@@ -94,9 +94,31 @@ async function probeJournalsSearch() {
   pass('journals.results', `top: ${arr[0].name} (IF ${arr[0].jif})`)
 }
 
+async function probeJournalInfo() {
+  const r = await getJson('/api/journal-info?issn=0028-4793')
+  if (r.status !== 200) return fail('journal_info.status', `HTTP ${r.status}`)
+  const j = r.json?.journal
+  if (!j) return fail('journal_info.shape', 'no journal key')
+  if (!j.name?.toLowerCase().includes('new england')) return fail('journal_info.match', `name=${j.name}`)
+  if (!Number.isFinite(+j.jif)) return fail('journal_info.jif', `jif=${j.jif}`)
+  pass('journal_info.match', `${j.name} (IF ${j.jif}, ${j.tier})`)
+}
+
+async function probeReferences() {
+  const r = await postJson('/api/references', { dois: ['10.1056/NEJMoa1504720', '10.1016/S0140-6736(18)32590-X', '10.1001/jama.2020.6019'] })
+  if (r.status !== 200) return fail('references.status', `HTTP ${r.status}: ${r.text.slice(0, 200)}`)
+  pass('references.status', `${r.status} in ${r.ms}ms`)
+  const s = r.json
+  if (!s || typeof s.n_resolved !== 'number') return fail('references.shape', 'missing n_resolved')
+  if (s.n_resolved < 1) return fail('references.resolved', `${s.n_resolved}/${s.n_input} resolved`)
+  pass('references.resolved', `${s.n_resolved}/${s.n_input} resolved, median IF ${s.median_jif}`)
+}
+
 await probeSimilar()
 await probeForecast()
 await probeJournalsSearch()
+await probeJournalInfo()
+await probeReferences()
 
 const passed = checks.filter(c => c.ok).length
 const failed = checks.filter(c => !c.ok).length
