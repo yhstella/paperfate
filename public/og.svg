@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0b10"/>
+      <stop offset="100%" stop-color="#1a1230"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Decorative orbits -->
+  <g opacity="0.12" stroke="#a78bfa" fill="none" stroke-width="1.5">
+    <circle cx="980" cy="220" r="160"/>
+    <circle cx="980" cy="220" r="220"/>
+    <circle cx="980" cy="220" r="280"/>
+  </g>
+  <g opacity="0.5">
+    <circle cx="980" cy="220" r="6" fill="#a78bfa"/>
+    <circle cx="1180" cy="320" r="4" fill="#7dd3fc"/>
+    <circle cx="780" cy="120" r="3" fill="#f472b6"/>
+  </g>
+
+  <!-- Chip -->
+  <g transform="translate(80, 90)">
+    <rect width="180" height="34" rx="17" fill="rgba(167,139,250,0.12)" stroke="rgba(167,139,250,0.4)"/>
+    <circle cx="20" cy="17" r="4" fill="#a78bfa"/>
+    <text x="36" y="22" font-family="Inter, system-ui" font-size="14" font-weight="600" fill="#cbd5e1" letter-spacing="2">FATECORE v0.4</text>
+  </g>
+
+  <!-- Title -->
+  <text x="80" y="220" font-family="Newsreader, serif" font-size="72" font-weight="600" fill="#f1f5f9">PaperFate</text>
+  <text x="80" y="305" font-family="Newsreader, serif" font-size="44" font-style="italic" fill="url(#accent)">Simulate your manuscript's</text>
+  <text x="80" y="360" font-family="Newsreader, serif" font-size="44" font-style="italic" fill="url(#accent)">future before submission</text>
+
+  <!-- Subtitle -->
+  <text x="80" y="430" font-family="Inter, system-ui" font-size="22" fill="#94a3b8">Journal tier · desk-reject risk · review timeline · citation potential</text>
+  <text x="80" y="462" font-family="Inter, system-ui" font-size="22" fill="#94a3b8">submission journey · counterfactual suggestions · similar papers</text>
+
+  <!-- Stats row -->
+  <g transform="translate(80, 520)" font-family="Inter, system-ui" fill="#cbd5e1">
+    <g>
+      <text x="0" y="0" font-size="32" font-weight="700">3.5M</text>
+      <text x="0" y="28" font-size="13" fill="#64748b" letter-spacing="1">PUBMED PAPERS</text>
+    </g>
+    <g transform="translate(170, 0)">
+      <text x="0" y="0" font-size="32" font-weight="700">2,840</text>
+      <text x="0" y="28" font-size="13" fill="#64748b" letter-spacing="1">JOURNALS</text>
+    </g>
+    <g transform="translate(360, 0)">
+      <text x="0" y="0" font-size="32" font-weight="700">90%</text>
+      <text x="0" y="28" font-size="13" fill="#64748b" letter-spacing="1">CONFORMAL COVERAGE</text>
+    </g>
+    <g transform="translate(640, 0)">
+      <text x="0" y="0" font-size="32" font-weight="700">v0.2-prod</text>
+      <text x="0" y="28" font-size="13" fill="#64748b" letter-spacing="1">+ v0.4-TIMELINE</text>
+    </g>
+  </g>
+
+  <!-- URL -->
+  <text x="80" y="610" font-family="JetBrains Mono, monospace" font-size="14" fill="#64748b">paperfate.com</text>
+</svg>
