@@ -545,6 +545,74 @@ const FIELD_CATEGORY_MAP = {
   ai_imaging: ['radiology', 'imaging', 'computer'],
 }
 
+// Split a journal-category string into a set of normalized tokens
+// (e.g. "oncology - scie(q1)" → {"oncology"}; "general & internal medicine" → {"general","medicine"}).
+function categoryTokens(catRaw) {
+  const cat = String(catRaw || '').toLowerCase()
+  if (!cat) return new Set()
+  const stripped = cat
+    .replace(/\b(scie|ssci)\s*\(\s*q[1-4]\s*\)/g, '')
+    .replace(/\bq[1-4]\b/g, '')
+    .replace(/[()]/g, ' ')
+  const tokens = stripped.split(/[\s,;/&\-]+/).map(t => t.trim()).filter(t => t.length > 2)
+  const stop = new Set(['and', 'the', 'for', 'general', 'journal', 'science', 'sciences'])
+  return new Set(tokens.filter(t => !stop.has(t)))
+}
+
+function jaccard(a, b) {
+  if (!a.size && !b.size) return 1
+  if (!a.size || !b.size) return 0
+  let inter = 0
+  for (const x of a) if (b.has(x)) inter++
+  const union = a.size + b.size - inter
+  return inter / union
+}
+
+// Switch cost between two journals on a 0..1 scale, plus a human reason.
+// Components: (a) category jaccard distance, (b) publisher change,
+// (c) JIF gap (log scale), (d) OA model change.
+function computeSwitchCost(from, to) {
+  if (!from || !to) return { cost: 0, label: 'first submission', reason: 'Highest-impact target.' }
+
+  const fromCats = categoryTokens(from.category)
+  const toCats   = categoryTokens(to.category)
+  const catSim   = jaccard(fromCats, toCats)
+  const catDist  = 1 - catSim                                              // 0 = same scope, 1 = unrelated
+
+  const publisherChange = (from.publisher || '') !== (to.publisher || '') ? 1 : 0
+  const oaChange        = !!from.is_oa !== !!to.is_oa ? 1 : 0
+
+  const fJif = Number.isFinite(+from.jif) ? Math.max(0.1, +from.jif) : null
+  const tJif = Number.isFinite(+to.jif)   ? Math.max(0.1, +to.jif)   : null
+  const jifGap = fJif != null && tJif != null
+    ? Math.min(1, Math.abs(Math.log(fJif) - Math.log(tJif)) / Math.log(8))  // log-ratio of 8x → 1.0
+    : 0.3                                                                   // unknown → moderate proxy
+
+  // Weighted sum, clipped to [0, 1].
+  const cost = Math.min(1, 0.45 * catDist + 0.25 * publisherChange + 0.20 * jifGap + 0.10 * oaChange)
+
+  const reasons = []
+  if (catDist <= 0.15) reasons.push('same scope')
+  else if (catDist <= 0.5) reasons.push('adjacent scope')
+  else reasons.push('different scope — abstract/intro rewrite likely')
+
+  if (!publisherChange) reasons.push('same publisher (reference style reusable)')
+  else reasons.push('publisher change (reformat references)')
+
+  if (jifGap < 0.25) reasons.push('similar IF tier')
+  else if (jifGap < 0.6) reasons.push('IF tier shift')
+  else reasons.push('large IF tier shift — adjust framing')
+
+  if (oaChange) reasons.push(from.is_oa ? 'switching to subscription model' : 'switching to OA (APC may apply)')
+
+  const label = cost < 0.2 ? 'minimal'
+              : cost < 0.45 ? 'low'
+              : cost < 0.7 ? 'moderate'
+              : 'high'
+
+  return { cost: +cost.toFixed(3), label, reason: reasons.join(' · ') }
+}
+
 function generateJourney(jifPred, manuscript, extraction) {
   const journals = loadJournals()
   if (!journals.length || !jifPred || !Number.isFinite(jifPred.point)) return []
@@ -577,19 +645,21 @@ function generateJourney(jifPred, manuscript, extraction) {
   const pred = jifPred.point
   // 5 steps: stretch → best-fit → backup1 → backup2 → safety
   const targets = [
-    { step: 1, label: 'stretch (aspirational)',   jif: pred * 1.5, switchCost: 'first submission', switchReason: 'Highest-impact target.' },
-    { step: 2, label: 'best fit (predicted JIF)', jif: pred,        switchCost: 'low',              switchReason: 'Closest match to predicted impact.' },
-    { step: 3, label: 'backup tier-1',            jif: pred * 0.7,  switchCost: 'low',              switchReason: 'Slightly lower IF — broader scope.' },
-    { step: 4, label: 'backup tier-2',            jif: pred * 0.5,  switchCost: 'minimal',          switchReason: 'Pragmatic alternative.' },
-    { step: 5, label: 'safety (OA fast review)',  jif: pred * 0.35, switchCost: 'minimal',          switchReason: 'High-acceptance OA venue for faster timeline.' },
+    { step: 1, label: 'stretch (aspirational)',  jif: pred * 1.5 },
+    { step: 2, label: 'best fit (predicted JIF)', jif: pred },
+    { step: 3, label: 'backup tier-1',            jif: pred * 0.7 },
+    { step: 4, label: 'backup tier-2',            jif: pred * 0.5 },
+    { step: 5, label: 'safety (OA fast review)',  jif: pred * 0.35 },
   ]
 
   const usedKeys = new Set()
   const result = []
+  let prevPick = null
   for (const t of targets) {
     const pick = pickBest(t.jif, usedKeys)
     if (!pick) continue
     usedKeys.add(pick.issn || pick.name)
+    const sc = computeSwitchCost(prevPick, pick)
     result.push({
       step: t.step,
       venue: pick.name,
@@ -597,11 +667,13 @@ function generateJourney(jifPred, manuscript, extraction) {
       if: pick.jif,
       publisher: pick.publisher || '—',
       style: pick.category || (pick.is_oa ? 'open access' : 'specialty journal'),
-      switchCost: t.switchCost,
-      switchReason: t.switchReason,
+      switchCost: sc.label,
+      switchCostValue: sc.cost,
+      switchReason: sc.reason,
       tier: pick.tier,
       is_oa: pick.is_oa,
     })
+    prevPick = pick
   }
   return result
 }

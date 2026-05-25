@@ -245,7 +245,11 @@ function resultLegacyShape(r) {
     timeline: timelineFromTier(p.jcr_jif),
     citation: citationsFormat(p.citations_5yr, r.overall_score),
     weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
-    suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => w.name),
+    suggestions: (Array.isArray(r.counterfactual_suggestions) && r.counterfactual_suggestions.length > 0
+      ? r.counterfactual_suggestions.map(s =>
+          `${s.name} → +${s.predicted_jif_lift?.toFixed?.(1) ?? s.predicted_jif_lift} JIF`)
+      : (r.key_weaknesses || []).slice(0, 5).map(w => w.name)
+    ),
     similars: (r.similar_papers || []).map(s => ({
       title: s.title || '—',
       venue: s.venue || '—',

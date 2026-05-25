@@ -108,7 +108,8 @@ export default function ResultPanel({ result, input }) {
                     <span className={`chip ${
                       j.switchCost === 'minimal' || j.switchCost === 'first submission' ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' :
                       j.switchCost === 'low' ? 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' :
-                      'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]'
+                      j.switchCost === 'moderate' ? 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' :
+                      'border-rose-400/30 text-rose-300/90 bg-rose-400/[0.06]'
                     }`}>
                       {i === 0 ? 'start' : `switch cost · ${j.switchCost}`}
                     </span>
