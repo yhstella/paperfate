@@ -351,6 +351,14 @@ function resultLegacyShape(r) {
     })),
     targetJournal: r.target_journal_info || null,
     referencesSummary: r.references_summary || null,
+    confidence: Number.isFinite(+r.confidence) ? +r.confidence : null,
+    fatecoreMeta: r.fatecore
+      ? {
+          version: r.fatecore.version,
+          timelineModel: r.fatecore.timeline_model,
+          modelStatus: r.fatecore.model_status,
+        }
+      : null,
     journey: r.journey || [],
   }
 }

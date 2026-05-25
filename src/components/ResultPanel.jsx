@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -184,10 +184,22 @@ export default function ResultPanel({ result, input }) {
         </div>
       )}
 
-      <p className="mt-6 text-xs text-slate-500">
-        ⓘ Forecast is probabilistic, not a guarantee. PaperFate compares your manuscript against
-        published literature; outcomes also depend on reviewers, editors, and timing.
-      </p>
+      <div className="mt-6 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+        <span>ⓘ Forecast is probabilistic, not a guarantee. PaperFate compares your manuscript against published literature; outcomes also depend on reviewers, editors, and timing.</span>
+      </div>
+      {(Number.isFinite(confidence) || fatecoreMeta?.version || fatecoreMeta?.timelineModel) && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          {Number.isFinite(confidence) && (
+            <span className="chip" title="Overall extraction + model confidence">
+              confidence {(confidence * 100).toFixed(0)}%
+            </span>
+          )}
+          {fatecoreMeta?.version && <span className="chip">{fatecoreMeta.version}</span>}
+          {fatecoreMeta?.timelineModel && fatecoreMeta.timelineModel !== 'not_loaded' && (
+            <span className="chip">{fatecoreMeta.timelineModel}</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
