@@ -12,6 +12,9 @@
     },
     "api/journal-info.js": {
       "maxDuration": 10
+    },
+    "api/references.js": {
+      "maxDuration": 60
     }
   }
 }
