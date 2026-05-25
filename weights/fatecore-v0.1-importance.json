@@ -1,0 +1,308 @@
+{
+  "y_jcr_jif": [
+    {
+      "col": "mesh_terms_count",
+      "gain": 361948.3951034546,
+      "splits": 821
+    },
+    {
+      "col": "author_count",
+      "gain": 233672.7985830307,
+      "splits": 357
+    },
+    {
+      "col": "publication_types_count",
+      "gain": 110365.37839508057,
+      "splits": 477
+    },
+    {
+      "col": "q_DESIGN_001",
+      "gain": 103754.68671894073,
+      "splits": 287
+    },
+    {
+      "col": "median_team_h_index",
+      "gain": 95551.01839256287,
+      "splits": 768
+    },
+    {
+      "col": "max_team_h_index",
+      "gain": 67797.58228778839,
+      "splits": 608
+    },
+    {
+      "col": "q_STATS_007",
+      "gain": 63684.12792778015,
+      "splits": 210
+    },
+    {
+      "col": "q_NOVEL_009",
+      "gain": 50680.868198394775,
+      "splits": 204
+    },
+    {
+      "col": "q_RELEV_001",
+      "gain": 45354.02602100372,
+      "splits": 140
+    },
+    {
+      "col": "international_collab",
+      "gain": 41885.01528739929,
+      "splits": 224
+    },
+    {
+      "col": "q_DESIGN_014",
+      "gain": 35546.13562965393,
+      "splits": 187
+    },
+    {
+      "col": "team_size_with_id",
+      "gain": 35218.430174827576,
+      "splits": 301
+    },
+    {
+      "col": "q_QUEST_003",
+      "gain": 32247.286813735962,
+      "splits": 164
+    },
+    {
+      "col": "q_DESIGN_013",
+      "gain": 31959.149631500244,
+      "splits": 146
+    },
+    {
+      "col": "is_research_article",
+      "gain": 31195.834354400635,
+      "splits": 231
+    },
+    {
+      "col": "q_QUEST_006",
+      "gain": 30552.061334609985,
+      "splits": 127
+    },
+    {
+      "col": "q_BIAS_001",
+      "gain": 28226.024320602417,
+      "splits": 137
+    },
+    {
+      "col": "q_POPUL_005",
+      "gain": 25978.56188774109,
+      "splits": 193
+    },
+    {
+      "col": "q_OUTCM_037",
+      "gain": 25754.32926750183,
+      "splits": 165
+    },
+    {
+      "col": "has_funder",
+      "gain": 22395.28635406494,
+      "splits": 107
+    }
+  ],
+  "y_icite_rcr": [
+    {
+      "col": "q_REPRT_013",
+      "gain": 7581939.847457886,
+      "splits": 202
+    },
+    {
+      "col": "q_REPRT_004",
+      "gain": 4398983.045654297,
+      "splits": 105
+    },
+    {
+      "col": "year",
+      "gain": 2395683.6384735107,
+      "splits": 827
+    },
+    {
+      "col": "mesh_terms_count",
+      "gain": 2334406.8351135254,
+      "splits": 694
+    },
+    {
+      "col": "publication_types_count",
+      "gain": 1813925.2006988525,
+      "splits": 493
+    },
+    {
+      "col": "q_DESIGN_005",
+      "gain": 1115855.6049346924,
+      "splits": 295
+    },
+    {
+      "col": "q_OUTCM_011",
+      "gain": 1079241.4645385742,
+      "splits": 172
+    },
+    {
+      "col": "q_POPUL_012",
+      "gain": 981973.104888916,
+      "splits": 174
+    },
+    {
+      "col": "q_DESIGN_003",
+      "gain": 940513.5618896484,
+      "splits": 57
+    },
+    {
+      "col": "q_BIAS_033",
+      "gain": 927967.4293212891,
+      "splits": 190
+    },
+    {
+      "col": "q_OUTCM_001",
+      "gain": 830296.2365112305,
+      "splits": 164
+    },
+    {
+      "col": "q_BIAS_001",
+      "gain": 816147.4662780762,
+      "splits": 181
+    },
+    {
+      "col": "pub_year_age",
+      "gain": 791751.423248291,
+      "splits": 228
+    },
+    {
+      "col": "q_STATS_007",
+      "gain": 782107.904083252,
+      "splits": 188
+    },
+    {
+      "col": "q_BIAS_029",
+      "gain": 742897.4072570801,
+      "splits": 199
+    },
+    {
+      "col": "q_POPUL_013",
+      "gain": 707465.6128234863,
+      "splits": 189
+    },
+    {
+      "col": "q_DESIGN_001",
+      "gain": 581560.2428131104,
+      "splits": 201
+    },
+    {
+      "col": "q_DESIGN_011",
+      "gain": 563103.9039916992,
+      "splits": 138
+    },
+    {
+      "col": "q_POPUL_008",
+      "gain": 559929.6336669922,
+      "splits": 170
+    },
+    {
+      "col": "q_NOVEL_001",
+      "gain": 505889.3275756836,
+      "splits": 190
+    }
+  ],
+  "y_citations_log": [
+    {
+      "col": "year",
+      "gain": 140023.477550745,
+      "splits": 583
+    },
+    {
+      "col": "pub_year_age",
+      "gain": 36721.539874106646,
+      "splits": 127
+    },
+    {
+      "col": "publication_types_count",
+      "gain": 11660.354731589556,
+      "splits": 466
+    },
+    {
+      "col": "q_BIAS_029",
+      "gain": 7026.809185624123,
+      "splits": 157
+    },
+    {
+      "col": "q_DESIGN_003",
+      "gain": 5268.4796896874905,
+      "splits": 82
+    },
+    {
+      "col": "mesh_terms_count",
+      "gain": 2514.9431226551533,
+      "splits": 770
+    },
+    {
+      "col": "q_BIAS_033",
+      "gain": 1910.050108909607,
+      "splits": 103
+    },
+    {
+      "col": "team_size_with_id",
+      "gain": 1841.5044133663177,
+      "splits": 256
+    },
+    {
+      "col": "is_clinical",
+      "gain": 1661.5561279803514,
+      "splits": 122
+    },
+    {
+      "col": "q_STATS_007",
+      "gain": 1455.537565290928,
+      "splits": 281
+    },
+    {
+      "col": "q_DESIGN_030",
+      "gain": 1183.8961757719517,
+      "splits": 109
+    },
+    {
+      "col": "author_count",
+      "gain": 1109.1087127029896,
+      "splits": 210
+    },
+    {
+      "col": "q_DESIGN_005",
+      "gain": 1038.0224900841713,
+      "splits": 287
+    },
+    {
+      "col": "international_collab",
+      "gain": 802.9556415081024,
+      "splits": 131
+    },
+    {
+      "col": "q_REPRT_013",
+      "gain": 736.8211519122124,
+      "splits": 54
+    },
+    {
+      "col": "q_REPRT_004",
+      "gain": 597.1134853959084,
+      "splits": 97
+    },
+    {
+      "col": "q_POPUL_007",
+      "gain": 588.723023891449,
+      "splits": 155
+    },
+    {
+      "col": "q_DESIGN_001",
+      "gain": 581.0675792098045,
+      "splits": 193
+    },
+    {
+      "col": "q_POPUL_005",
+      "gain": 571.6820701956749,
+      "splits": 186
+    },
+    {
+      "col": "has_funder",
+      "gain": 537.8314196318388,
+      "splits": 199
+    }
+  ]
+}
