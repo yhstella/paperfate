@@ -5,6 +5,27 @@
 import { simulate as mockSimulate } from './mockEngine.js'
 
 const API_PATH = '/api/forecast'
+const SIMILAR_PATH = '/api/similar'
+
+export async function fetchSimilar({ title, abstract }, { signal } = {}) {
+  try {
+    const res = await fetch(SIMILAR_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, abstract }),
+      signal,
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new Error(`/api/similar HTTP ${res.status}: ${detail.slice(0, 200)}`)
+    }
+    const json = await res.json()
+    return Array.isArray(json.similars) ? json.similars : []
+  } catch (err) {
+    console.warn('fetchSimilar failed:', err.message)
+    return []
+  }
+}
 
 // Map the legacy mock-engine output to the new server schema so the UI
 // can render both interchangeably. The server returns the canonical

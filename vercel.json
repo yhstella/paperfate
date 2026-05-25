@@ -3,6 +3,9 @@
   "functions": {
     "api/forecast.js": {
       "maxDuration": 300
+    },
+    "api/similar.js": {
+      "maxDuration": 30
     }
   }
 }

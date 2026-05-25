@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { forecast } from '../lib/forecastClient.js'
+import { forecast, fetchSimilar } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
@@ -107,8 +107,11 @@ export default function Simulator() {
       // Production: hit /api/forecast (server-side Gemini scoring).
       // Local dev (Vite preview has no /api): falls back to local mock engine
       // so the demo still works while you iterate on the UI.
-      const r = await forecast(input, { fallbackMock: true })
-      setResult(r)
+      const [r, similars] = await Promise.all([
+        forecast(input, { fallbackMock: true }),
+        fetchSimilar({ title, abstract: text }),
+      ])
+      setResult({ ...r, similar_papers: similars })
       setStatus('done')
       setTimeout(() => {
         document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -243,7 +246,13 @@ function resultLegacyShape(r) {
     citation: citationsFormat(p.citations_5yr, r.overall_score),
     weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
     suggestions: (r.key_weaknesses || []).slice(0, 5).map(w => w.name),
-    similars: [],
+    similars: (r.similar_papers || []).map(s => ({
+      title: s.title || '—',
+      venue: s.venue || '—',
+      if: s.if != null && Number.isFinite(+s.if) ? (+s.if).toFixed(1) : '—',
+      year: s.year || '—',
+      citations: s.citations ?? 0,
+    })),
     journey: r.journey || [],
   }
 }
