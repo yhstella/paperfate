@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -132,6 +132,20 @@ export default function ResultPanel({ result, input }) {
                 <span key={c.category}>{i > 0 && ' · '}{c.category} ({c.count})</span>
               ))}
             </div>
+          )}
+          {Number.isFinite(manuscriptJifPoint) && Number.isFinite(referencesSummary.median_jif) && referencesSummary.median_jif > 0 && (
+            (() => {
+              const ratio = manuscriptJifPoint / referencesSummary.median_jif
+              let verdict, tone
+              if (ratio >= 0.5 && ratio <= 2.0) { verdict = 'matched'; tone = 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' }
+              else if (ratio < 0.5) { verdict = 'bibliography tier higher — stretch targets worth trying'; tone = 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' }
+              else { verdict = 'bibliography tier lower — broader-impact framing may help'; tone = 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' }
+              return (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className={`chip ${tone}`}>manuscript JIF {manuscriptJifPoint.toFixed(2)} vs refs median {referencesSummary.median_jif} → {verdict}</span>
+                </div>
+              )
+            })()
           )}
           <div className="mt-2 text-[11px] text-slate-500">
             Descriptive only — your bibliography's tier helps you sanity-check whether the journey above matches the literature you're already citing.

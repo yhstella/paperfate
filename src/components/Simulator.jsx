@@ -343,6 +343,7 @@ function resultLegacyShape(r) {
       : (r.key_weaknesses || []).slice(0, 5).map(w => w.name)
     ),
     jointCounterfactual: r.joint_counterfactual || null,
+    manuscriptJifPoint: Number.isFinite(+p.jcr_jif?.point) ? +p.jcr_jif.point : null,
     similars: (r.similar_papers || []).map(s => ({
       title: s.title || '—',
       venue: s.venue || '—',
