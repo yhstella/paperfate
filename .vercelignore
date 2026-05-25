@@ -1,0 +1,26 @@
+# Keep deploy archive lean — only production-loaded model weights ship.
+# Everything else lives in git for reproducibility but does not get bundled
+# into the Vercel function image.
+#
+# Production loader (src/server/fatecoreInference.js) currently reads only:
+#   weights/fatecore-v0.2-prod-*           ← active model
+#   weights/journals-shortlist.json         ← journey + /api/similar JIF lookup
+
+# Archived training rounds
+weights/fatecore-v0.1-*
+weights/fatecore-v0.2-y_*
+weights/fatecore-v0.2-metrics.json
+weights/fatecore-v0.3-y_*
+weights/fatecore-v0.3-metrics.json
+weights/fatecore-v0.3-prepub-*
+weights/fatecore-v0.3-pub-*
+
+# Local training/research scratch — never needed at request time
+data/
+*.db
+*.db-shm
+*.db-wal
+codex-batch.json
+codex-response.json
+scripts/__pycache__/
+__pycache__/
