@@ -32,7 +32,7 @@
 import { forecastManuscript } from '../src/server/extract.js'
 import { forecastManuscriptDeterministic } from '../src/server/deterministicExtract.js'
 import { predictFromExtraction } from '../src/server/fatecoreInference.js'
-import { generateSuggestions } from '../src/server/suggestionEngine.js'
+import { generateSuggestions, generateJointCounterfactual } from '../src/server/suggestionEngine.js'
 
 // Allow ~5 minutes for full Q500 runs. Vercel Pro plan needed for >60s functions;
 // on hobby plan this is best-effort and may time out for large requests.
@@ -141,13 +141,15 @@ export default async function handler(req, res) {
     }
     const fatecore = predictFromExtraction(manuscript, extraction, inferenceOpts)
     const suggestions = generateSuggestions(extraction, manuscript, fatecore, inferenceOpts)
+    const jointCounterfactual = generateJointCounterfactual(extraction, manuscript, fatecore, suggestions, inferenceOpts)
     const wallMs = Date.now() - t0
     return res.status(200).json({
       ...extraction,
       ...fatecore,
       counterfactual_suggestions: suggestions,
+      joint_counterfactual: jointCounterfactual,
       wall_ms: wallMs,
-      server_version: '0.3.0',
+      server_version: '0.3.1',
     })
   } catch (e) {
     return bad(res, 500, 'extraction_failed', String(e.message || e))

@@ -342,6 +342,7 @@ function resultLegacyShape(r) {
           `${s.name} → +${s.predicted_jif_lift?.toFixed?.(1) ?? s.predicted_jif_lift} JIF`)
       : (r.key_weaknesses || []).slice(0, 5).map(w => w.name)
     ),
+    jointCounterfactual: r.joint_counterfactual || null,
     similars: (r.similar_papers || []).map(s => ({
       title: s.title || '—',
       venue: s.venue || '—',

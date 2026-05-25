@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -56,6 +56,28 @@ export default function ResultPanel({ result, input }) {
           <div className="text-sm leading-relaxed text-slate-300">{weakness}</div>
         </Card>
       </div>
+
+      {jointCounterfactual && jointCounterfactual.items_count >= 2 && (
+        <div className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you fix all top {jointCounterfactual.items_count}</div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="text-2xl font-semibold text-slate-100">
+              +{jointCounterfactual.predicted_jif_lift?.toFixed?.(2)} <span className="text-base font-normal text-slate-400">JIF together</span>
+            </span>
+            <span className="chip">baseline {jointCounterfactual.baseline_jif?.toFixed?.(2)}</span>
+            <span className="chip">lifted {jointCounterfactual.lifted_jif?.toFixed?.(2)}</span>
+            <span className={`chip ${Math.abs(jointCounterfactual.interaction_gap) < 0.05 ? '' : jointCounterfactual.interaction_gap > 0 ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' : 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]'}`}>
+              {jointCounterfactual.interaction_gap > 0 ? '+' : ''}{jointCounterfactual.interaction_gap?.toFixed?.(2)} vs sum
+            </span>
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            {(jointCounterfactual.item_names || []).join(' · ')}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            The single-item lifts above each fix one weakness in isolation. This joint counterfactual fixes the top {jointCounterfactual.items_count} simultaneously and reports the combined predicted JIF. A positive 'vs sum' means the items interact super-additively (combined lift larger than the sum of singletons).
+          </div>
+        </div>
+      )}
 
       {targetJournal && (
         <div className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
