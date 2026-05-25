@@ -552,9 +552,9 @@ function detectFields(manuscript, extraction) {
     nephrology: /\b(kidney|renal|dialysis|nephro|glomerul)\b/,
     rheumatology: /\b(rheumatoid|lupus|arthritis|autoimmune|vasculitis)\b/,
     psychiatry: /\b(depression|schizophrenia|bipolar|anxiety|psychiatric|psychotic|suicide)\b/,
-    infectious: /\b(infection|infectious|hiv|tuberculosis|antibiotic|sepsis|covid|vaccine|microbi)\b/,
-    pediatrics: /\b(pediatric|paediatric|neonatal|infant|child|adolescent)\b/,
-    obgyn: /\b(pregnan|obstetric|gynec|maternal|fetal|cesarean|delivery)\b/,
+    infectious: /\b(infection|infectious|hiv|tuberculosis|antimicrobial|sepsis|covid|vaccine|microbi)\b/,
+    pediatrics: /\b(pediatric|paediatric|neonatal|infant|childhood|child|children|adolescent|birth cohort)\b/,
+    obgyn: /\b(pregnan|obstetric|gynec|maternal|fetal|cesarean)\b/,
     hematology: /\b(blood|leukemia|lymphoma|anemia|hemato|sickle|thrombo)\b/,
     surgery: /\b(surgery|surgical|laparoscop|operative|perioperative|anesthesia)\b/,
     public_health: /\b(epidemiol|public health|population|policy|disparities)\b/,
@@ -574,7 +574,7 @@ const FIELD_CATEGORY_MAP = {
   endocrine: ['endocrinology', 'diabetes', 'metabolism', 'nutrition'],
   gastro: ['gastroenterology', 'hepatology'],
   pulmonology: ['respiratory', 'pulmonary'],
-  nephrology: ['urology', 'nephrology'],
+  nephrology: ['nephrology', 'renal', 'kidney'],
   rheumatology: ['rheumatology'],
   psychiatry: ['psychiatry', 'psychology'],
   infectious: ['infectious', 'microbiology', 'virology'],
@@ -667,9 +667,16 @@ function generateJourney(jifPred, manuscript, extraction) {
   function scoreFit(j, targetJif) {
     if (j.jif == null) return 0
     const ratio = Math.min(j.jif, targetJif) / Math.max(j.jif, targetJif)
-    const fieldBoost = fieldCats.size && j.category
-      ? ([...fieldCats].some(c => j.category.includes(c)) ? 1.6 : 0.8)
-      : 1.0
+    let fieldBoost = 1.0
+    if (fieldCats.size && j.category) {
+      const cat = String(j.category).toLowerCase()
+      const matches = [...fieldCats].filter(c => cat.includes(c)).length
+      // Strong boost if any field-category overlap; multi-overlap multiplies further.
+      // Penalize unrelated categories more aggressively so off-topic picks lose out.
+      if (matches >= 2) fieldBoost = 3.0
+      else if (matches === 1) fieldBoost = 2.2
+      else fieldBoost = 0.55
+    }
     return ratio * fieldBoost
   }
 
