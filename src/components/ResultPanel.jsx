@@ -105,13 +105,15 @@ export default function ResultPanel({ result, input }) {
                   </div>
                   <div className="mt-1 text-xs text-slate-400">{j.style}</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                    <span className={`chip ${
+                    <span
+                      title={i === 0 || j.switchCostValue == null ? undefined : `cost ${j.switchCostValue.toFixed(3)} on 0–1 scale (category jaccard + publisher + |Δlog IF| + OA model)`}
+                      className={`chip ${
                       j.switchCost === 'minimal' || j.switchCost === 'first submission' ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' :
                       j.switchCost === 'low' ? 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' :
                       j.switchCost === 'moderate' ? 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' :
                       'border-rose-400/30 text-rose-300/90 bg-rose-400/[0.06]'
                     }`}>
-                      {i === 0 ? 'start' : `switch cost · ${j.switchCost}`}
+                      {i === 0 ? 'start' : `switch cost · ${j.switchCost}${Number.isFinite(j.switchCostValue) ? ` (${j.switchCostValue.toFixed(2)})` : ''}`}
                     </span>
                     {j.switchReason && <span className="text-slate-400">{j.switchReason}</span>}
                   </div>
