@@ -6,6 +6,9 @@
     },
     "api/similar.js": {
       "maxDuration": 30
+    },
+    "api/journals-search.js": {
+      "maxDuration": 10
     }
   }
 }

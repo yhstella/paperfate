@@ -29,14 +29,49 @@ const STUDY_TYPES = [
 
 const TARGETS = ['Auto-recommend', 'IF <5', 'IF 5–10', 'IF 10–15', 'IF 15–25', 'IF >25 (top-tier)']
 
-const SAMPLE = {
-  title: 'Empagliflozin and major adverse cardiovascular events in adults with chronic kidney disease',
-  text: `Background: SGLT2 inhibitors reduce cardiovascular events in patients with type 2 diabetes, but their effect in adults with chronic kidney disease (CKD) without diabetes is uncertain.
+const SAMPLES = [
+  {
+    key: 'rct_cardiometabolic',
+    label: 'RCT · cardiometabolic',
+    title: 'Empagliflozin and major adverse cardiovascular events in adults with chronic kidney disease',
+    text: `Background: SGLT2 inhibitors reduce cardiovascular events in patients with type 2 diabetes, but their effect in adults with chronic kidney disease (CKD) without diabetes is uncertain.
 Methods: In this international, multicenter, double-blind, placebo-controlled trial, we randomly assigned 6,609 adults with CKD (eGFR 20–45 ml/min/1.73 m^2 or eGFR 45–90 with albuminuria) to empagliflozin 10 mg daily or matching placebo. The primary composite outcome was progression of kidney disease or death from cardiovascular causes. Secondary outcomes included hospitalization for heart failure and all-cause mortality.
 Results: Median follow-up was 2.0 years. The primary outcome occurred in 432 of 3,304 participants (13.1%) in the empagliflozin group and in 558 of 3,305 (16.9%) in the placebo group (hazard ratio 0.72, 95% CI 0.64–0.82, P<0.001). Effects were consistent across pre-specified subgroups including patients without diabetes and those with the lowest baseline eGFR.
 Conclusions: Empagliflozin reduced the risk of kidney-disease progression or cardiovascular death in adults with CKD, with and without diabetes.`,
-  inputMode: 'abstract',
-}
+    inputMode: 'abstract',
+  },
+  {
+    key: 'meta_oncology',
+    label: 'Meta-analysis · oncology',
+    title: 'Immune checkpoint inhibitors versus chemotherapy in advanced non–small-cell lung cancer: a meta-analysis of randomized trials',
+    text: `Background: First-line therapy for advanced non–small-cell lung cancer (NSCLC) has shifted toward immune checkpoint inhibitors (ICIs), but comparative effectiveness across PD-L1 expression subgroups remains debated.
+Methods: We systematically searched PubMed, Embase, and Cochrane CENTRAL through December 2024 for phase III randomized trials comparing first-line ICI-based regimens with platinum-doublet chemotherapy in advanced NSCLC without targetable driver alterations. Two reviewers independently extracted data and assessed risk of bias using Cochrane RoB 2. The primary outcome was overall survival (OS); secondary outcomes were progression-free survival (PFS), objective response rate (ORR), and grade ≥3 immune-related adverse events. We pooled hazard ratios (HRs) using random-effects models, stratified by PD-L1 tumor proportion score (TPS).
+Results: Fourteen trials including 8,742 patients met inclusion criteria. ICI-based regimens improved OS over chemotherapy alone (HR 0.74, 95% CI 0.69–0.80, I²=42%). The OS benefit was largest in PD-L1 TPS ≥50% (HR 0.66, 95% CI 0.57–0.76) and attenuated in TPS <1% (HR 0.85, 95% CI 0.74–0.97). Grade ≥3 immune-related events occurred in 17.4% of ICI recipients versus 4.2% with chemotherapy.
+Conclusions: First-line ICI-based therapy improves OS in advanced NSCLC across PD-L1 strata, with greatest benefit in PD-L1-high tumors.`,
+    inputMode: 'abstract',
+  },
+  {
+    key: 'observational_pediatric',
+    label: 'Cohort · pediatrics',
+    title: 'Early antibiotic exposure and incident childhood asthma in a population-based birth cohort',
+    text: `Background: Early-life antibiotic exposure has been hypothesized to perturb the developing microbiome and increase asthma risk, but evidence from large cohorts with confounding control is inconsistent.
+Methods: We assembled a population-based birth cohort of 412,098 children born between 2008 and 2018 from linked national health registries in Denmark. Antibiotic dispensations during the first year of life were classified by spectrum and indication. The outcome was a recorded diagnosis of asthma between ages 2 and 10. We used Cox proportional hazards models adjusted for maternal asthma, mode of delivery, gestational age, breastfeeding duration, household smoking, and socioeconomic indicators. Sibling-pair analyses were performed to address shared familial confounding.
+Results: 89,431 children (21.7%) received ≥1 antibiotic course in year 1. Asthma was diagnosed in 36,219 children (8.8%) over median 6.4 years of follow-up. After adjustment, year-1 antibiotic exposure was associated with incident asthma (HR 1.27, 95% CI 1.24–1.31). The association attenuated but remained in sibling-pair analyses (HR 1.11, 95% CI 1.05–1.18). Effect estimates were larger for broad-spectrum antibiotics and for exposures associated with non-respiratory indications.
+Conclusions: Early antibiotic exposure was modestly associated with childhood asthma after accounting for shared familial factors, supporting a partially causal contribution.`,
+    inputMode: 'abstract',
+  },
+  {
+    key: 'ai_imaging',
+    label: 'AI · radiology',
+    title: 'A deep-learning model for detection of incidental pulmonary embolism on routine chest CT',
+    text: `Background: Incidental pulmonary embolism (iPE) on chest CT performed for other indications is underdiagnosed. We developed and externally validated a deep-learning model to flag suspected iPE in real time at the point of imaging.
+Methods: Training data comprised 47,302 contrast-enhanced chest CT studies from three academic centers (2014–2022), with iPE labels established by adjudicated radiologist re-read. We trained a 3D convolutional neural network with attention pooling, using only routine chest-CT studies (PE-protocol CTs were excluded). External validation was performed prospectively on 8,914 consecutive chest CTs from a fourth, geographically distinct center. The primary outcome was area under the receiver operating characteristic curve (AUROC) for iPE detection; secondary outcomes included sensitivity and specificity at the operating point and time-to-flag.
+Results: In external validation, iPE prevalence was 1.8%. The model achieved AUROC 0.962 (95% CI 0.954–0.970) with sensitivity 92.4% and specificity 96.1% at the prespecified threshold. Median time from image acquisition to flag was 41 seconds. Calibration was preserved across subgroups defined by scanner vendor, slice thickness, and patient body mass index.
+Conclusions: A deep-learning model accurately and rapidly detected incidental pulmonary embolism on routine chest CT across an external cohort.`,
+    inputMode: 'abstract',
+  },
+]
+const SAMPLE = SAMPLES[0]
 
 const PLACEHOLDER = `Paste your abstract here. PaperFate will read it and auto-detect study type, sample size, field, and endpoints — you can correct anything below before simulating.
 
@@ -75,10 +110,10 @@ export default function Simulator() {
     return fallback
   }
 
-  function loadSample() {
-    setTitle(SAMPLE.title)
-    setText(SAMPLE.text)
-    setInputMode(SAMPLE.inputMode)
+  function loadSample(sample = SAMPLE) {
+    setTitle(sample.title)
+    setText(sample.text)
+    setInputMode(sample.inputMode)
     setOverrides({})
     setStatus('idle')
     setResult(null)
@@ -138,7 +173,22 @@ export default function Simulator() {
             <Bullet>Field- and year-normalized citation percentiles</Bullet>
             <Bullet>LLM-graded novelty, methods, clinical relevance</Bullet>
           </ul>
-          <button onClick={loadSample} type="button" className="mt-6 text-xs text-fate-300 underline-offset-4 hover:underline">
+          <div className="mt-6">
+            <div className="text-xs text-slate-500 mb-2">Try a sample:</div>
+            <div className="flex flex-wrap gap-2">
+              {SAMPLES.map(s => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => loadSample(s)}
+                  className="rounded-md border border-fate-400/30 bg-fate-400/[0.06] px-2.5 py-1 text-xs text-fate-300 hover:bg-fate-400/[0.12] transition-colors"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => loadSample()} type="button" className="mt-3 text-xs text-fate-300 underline-offset-4 hover:underline hidden">
             ↳ Try a sample manuscript
           </button>
         </div>
