@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -49,6 +49,28 @@ export default function ResultPanel({ result, input }) {
           <div className="text-sm leading-relaxed text-slate-300">{weakness}</div>
         </Card>
       </div>
+
+      {targetJournal && (
+        <div className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you submit to your target</div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="font-semibold text-slate-100">{targetJournal.name}</span>
+            {targetJournal.issn && <span className="chip">ISSN {targetJournal.issn}</span>}
+            {Number.isFinite(+targetJournal.jif) && <span className="chip">prior-year IF {(+targetJournal.jif).toFixed(2)}</span>}
+            {Number.isFinite(+targetJournal.jif_5yr) && <span className="chip">5-yr IF {(+targetJournal.jif_5yr).toFixed(2)}</span>}
+            {targetJournal.tier && <span className="chip">{targetJournal.tier} tier</span>}
+            {targetJournal.quartile && <span className="chip">{targetJournal.quartile}</span>}
+            {targetJournal.is_oa && <span className="chip">open access</span>}
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            {targetJournal.publisher || '—'}{targetJournal.country ? ` · ${targetJournal.country}` : ''}
+            {targetJournal.category ? ` · ${targetJournal.category}` : ''}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            Prior-year IF is the journal's published Journal Citation Reports score from the year before. Use it to anchor expectations; PaperFate's manuscript-level forecast above is independent of this number.
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">

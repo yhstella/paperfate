@@ -6,6 +6,24 @@ import { simulate as mockSimulate } from './mockEngine.js'
 
 const API_PATH = '/api/forecast'
 const SIMILAR_PATH = '/api/similar'
+const JOURNAL_INFO_PATH = '/api/journal-info'
+
+export async function fetchJournalInfo(queryRaw, { signal } = {}) {
+  const q = String(queryRaw || '').trim()
+  if (q.length < 3) return null
+  const isIssn = /^\d{4}-?\d{3}[\dxX]$/.test(q.replace(/\s+/g, ''))
+  const url = `${JOURNAL_INFO_PATH}?${isIssn ? 'issn' : 'name'}=${encodeURIComponent(q)}`
+  try {
+    const res = await fetch(url, { signal })
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`/api/journal-info HTTP ${res.status}`)
+    const json = await res.json()
+    return json.journal || null
+  } catch (err) {
+    console.warn('fetchJournalInfo failed:', err.message)
+    return null
+  }
+}
 
 export async function fetchSimilar({ title, abstract }, { signal } = {}) {
   try {

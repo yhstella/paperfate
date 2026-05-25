@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { forecast, fetchSimilar } from '../lib/forecastClient.js'
+import { forecast, fetchSimilar, fetchJournalInfo } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
@@ -98,6 +98,8 @@ export default function Simulator() {
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
 
+  const [targetJournalInput, setTargetJournalInput] = useState('')
+
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
@@ -142,11 +144,13 @@ export default function Simulator() {
       // Production: hit /api/forecast (server-side Gemini scoring).
       // Local dev (Vite preview has no /api): falls back to local mock engine
       // so the demo still works while you iterate on the UI.
-      const [r, similars] = await Promise.all([
+      const tjQuery = targetJournalInput.trim()
+      const [r, similars, targetJournalInfo] = await Promise.all([
         forecast(input, { fallbackMock: true }),
         fetchSimilar({ title, abstract: text }),
+        tjQuery ? fetchJournalInfo(tjQuery) : Promise.resolve(null),
       ])
-      setResult({ ...r, similar_papers: similars })
+      setResult({ ...r, similar_papers: similars, target_journal_info: targetJournalInfo })
       setStatus('done')
       setTimeout(() => {
         document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -237,6 +241,19 @@ export default function Simulator() {
               )}
             </Field>
 
+            <Field label="Target journal (optional)">
+              <input
+                value={targetJournalInput}
+                onChange={e => setTargetJournalInput(e.target.value)}
+                placeholder="e.g. The Lancet, JAMA, 0028-4793"
+                className="input"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                Looks up prior-year impact factor and tier so the journey can anchor on a real target.
+                Leave blank to let PaperFate recommend.
+              </div>
+            </Field>
+
             <DetectedPanel
               meta={meta}
               overrides={overrides}
@@ -307,6 +324,7 @@ function resultLegacyShape(r) {
       year: s.year || '—',
       citations: s.citations ?? 0,
     })),
+    targetJournal: r.target_journal_info || null,
     journey: r.journey || [],
   }
 }
