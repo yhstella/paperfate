@@ -15,6 +15,9 @@
     },
     "api/references.js": {
       "maxDuration": 60
+    },
+    "api/author-features.js": {
+      "maxDuration": 30
     }
   }
 }

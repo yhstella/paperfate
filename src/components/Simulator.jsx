@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary } from '../lib/forecastClient.js'
+import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures } from '../lib/forecastClient.js'
 import { extractAll } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
@@ -100,6 +100,7 @@ export default function Simulator() {
 
   const [targetJournalInput, setTargetJournalInput] = useState('')
   const [referencesInput, setReferencesInput] = useState('')
+  const [authorsInput, setAuthorsInput] = useState('')
 
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
@@ -151,6 +152,27 @@ export default function Simulator() {
         .map(s => s.trim())
         .filter(Boolean)
         .slice(0, 50)
+      const authorNames = authorsInput
+        .split(/[\r\n;]+/)
+        .map(s => s.replace(/^[\s,]+|[\s,]+$/g, '').trim())
+        .filter(s => s.length >= 3)
+        .slice(0, 25)
+
+      // First, resolve author features so the forecast call can use h-index inputs.
+      let authorFeatures = null
+      if (authorNames.length) {
+        authorFeatures = await fetchAuthorFeatures(authorNames)
+        if (authorFeatures) {
+          input.author_features = {
+            first_author_h_index: authorFeatures.first_author_h_index,
+            last_author_h_index: authorFeatures.last_author_h_index,
+            max_team_h_index: authorFeatures.max_team_h_index,
+            median_team_h_index: authorFeatures.median_team_h_index,
+            team_size_with_id: authorFeatures.team_size_with_id,
+          }
+        }
+      }
+
       const [r, similars, targetJournalInfo, referencesSummary] = await Promise.all([
         forecast(input, { fallbackMock: true }),
         fetchSimilar({ title, abstract: text }),
@@ -162,6 +184,7 @@ export default function Simulator() {
         similar_papers: similars,
         target_journal_info: targetJournalInfo,
         references_summary: referencesSummary,
+        author_features: authorFeatures,
       })
       setStatus('done')
       setTimeout(() => {
@@ -267,6 +290,19 @@ export default function Simulator() {
               </div>
             </Field>
 
+            <Field label="Authors (optional, one per line — first to last)">
+              <textarea
+                value={authorsInput}
+                onChange={e => setAuthorsInput(e.target.value)}
+                rows={3}
+                placeholder="Jane Smith&#10;John Doe&#10;Bertram Pitt"
+                className="input resize-y"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                Up to 25 names. Each is resolved through OpenAlex to feed first/last/max/median author h-index into FateCore. Order matters: first line → first author, last line → senior author.
+              </div>
+            </Field>
+
             <Field label="Reference DOIs (optional, one per line)">
               <textarea
                 value={referencesInput}
@@ -354,6 +390,7 @@ function resultLegacyShape(r) {
     })),
     targetJournal: r.target_journal_info || null,
     referencesSummary: r.references_summary || null,
+    authorFeatures: r.author_features || null,
     confidence: Number.isFinite(+r.confidence) ? +r.confidence : null,
     fatecoreMeta: r.fatecore
       ? {

@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -56,6 +56,32 @@ export default function ResultPanel({ result, input }) {
           <div className="text-sm leading-relaxed text-slate-300">{weakness}</div>
         </Card>
       </div>
+
+      {authorFeatures && authorFeatures.team_size_with_id > 0 && (
+        <div className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Author profile</div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="text-sm text-slate-200">{authorFeatures.team_size_with_id} of {(authorFeatures.resolved || []).length} authors resolved</span>
+            {Number.isFinite(authorFeatures.first_author_h_index) && <span className="chip">first-author h {authorFeatures.first_author_h_index}</span>}
+            {Number.isFinite(authorFeatures.last_author_h_index) && <span className="chip">senior-author h {authorFeatures.last_author_h_index}</span>}
+            {Number.isFinite(authorFeatures.max_team_h_index) && <span className="chip">max team h {authorFeatures.max_team_h_index}</span>}
+            {Number.isFinite(authorFeatures.median_team_h_index) && <span className="chip">median h {authorFeatures.median_team_h_index}</span>}
+          </div>
+          {(authorFeatures.resolved || []).length > 0 && (
+            <div className="mt-2 text-xs text-slate-400">
+              {(authorFeatures.resolved || []).slice(0, 8).map((a, i) => (
+                <span key={i}>
+                  {i > 0 && ' · '}
+                  {a.matched || a.name}{Number.isFinite(a.h_index) ? ` (h=${a.h_index})` : ' (?)'}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 text-[11px] text-slate-500">
+            FateCore consumes these h-indices directly; high-impact teams push the forecast up. Names matched through OpenAlex top-result — verify if the field is competitive (common names disambiguate poorly).
+          </div>
+        </div>
+      )}
 
       {jointCounterfactual && jointCounterfactual.items_count >= 2 && (
         <div className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">

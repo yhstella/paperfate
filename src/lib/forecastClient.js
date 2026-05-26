@@ -8,6 +8,27 @@ const API_PATH = '/api/forecast'
 const SIMILAR_PATH = '/api/similar'
 const JOURNAL_INFO_PATH = '/api/journal-info'
 const REFERENCES_PATH = '/api/references'
+const AUTHOR_FEATURES_PATH = '/api/author-features'
+
+export async function fetchAuthorFeatures(authors, { signal } = {}) {
+  const clean = Array.isArray(authors)
+    ? authors.map(s => String(s || '').trim()).filter(s => s.length >= 3)
+    : []
+  if (!clean.length) return null
+  try {
+    const res = await fetch(AUTHOR_FEATURES_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ authors: clean.slice(0, 25) }),
+      signal,
+    })
+    if (!res.ok) throw new Error(`/api/author-features HTTP ${res.status}`)
+    return await res.json()
+  } catch (err) {
+    console.warn('fetchAuthorFeatures failed:', err.message)
+    return null
+  }
+}
 
 export async function fetchReferencesSummary(dois, { signal } = {}) {
   const clean = Array.isArray(dois)
@@ -128,6 +149,8 @@ export async function forecast(input, opts = {}) {
     full_text: input.full_text,
     article_type: input.article_type || '*',
     mode: input.mode || 'auto',
+    ...(input.author_features && typeof input.author_features === 'object' && { author_features: input.author_features }),
+    ...(input.target_journal && { target_journal: input.target_journal }),
   }
 
   try {
