@@ -6,8 +6,14 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="#0a0b10"/>
-  <path d="M16 14h22l10 10v36H16z" fill="none" stroke="url(#g)" stroke-width="3"/>
-  <path d="M38 14v10h10" fill="none" stroke="url(#g)" stroke-width="3"/>
-  <circle cx="32" cy="42" r="9" fill="none" stroke="url(#g)" stroke-width="3"/>
-  <path d="M32 36v6l4 3" fill="none" stroke="url(#g)" stroke-width="3" stroke-linecap="round"/>
+  <g fill="none" stroke="url(#g)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Paper outline: bbox (17,12)–(47,52), centered at (32, 32) -->
+    <path d="M17 12 H40 L47 19 V52 H17 Z"/>
+    <!-- Folded corner -->
+    <path d="M40 12 V19 H47"/>
+    <!-- Clock: centered horizontally at 32, vertically near paper's optical centre -->
+    <circle cx="32" cy="34" r="8.5"/>
+    <!-- Hands: 12 o'clock (up) → centre → 3 o'clock (right) — symmetric cross -->
+    <path d="M32 28 V34 H38"/>
+  </g>
 </svg>
