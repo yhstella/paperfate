@@ -240,6 +240,7 @@ export default function Simulator() {
               {inputMode === 'full' ? (
                 <FileUpload
                   onText={setText}
+                  onTitle={(t) => { if (!title.trim()) setTitle(t) }}
                   currentTextLength={charCount}
                   hint="Headings, tables, and references are extracted as plain text. Figures are skipped."
                 />

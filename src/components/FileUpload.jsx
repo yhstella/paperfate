@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 
 const ACCEPTED = '.txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-export default function FileUpload({ onText, currentTextLength = 0, hint }) {
+export default function FileUpload({ onText, onTitle, currentTextLength = 0, hint }) {
   const inputRef = useRef(null)
   const [filename, setFilename] = useState(null)
   const [filesize, setFilesize] = useState(null)
@@ -19,6 +19,11 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
     try {
       const text = await parseFile(file)
       onText(text)
+      // If the parent didn't yet have a title, derive one from the file or text.
+      if (typeof onTitle === 'function') {
+        const derived = deriveTitle(text, file.name)
+        if (derived) onTitle(derived)
+      }
     } catch (e) {
       console.error('file parse failed:', e)
       setError(e?.message || 'Could not read this file. Try saving as PDF, DOCX, or TXT.')
@@ -26,6 +31,13 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
     } finally {
       setParsing(false)
     }
+  }
+
+  function pickFile(e) {
+    // Stop the native click from bubbling so the wrapper div doesn't re-invoke
+    // inputRef.current.click() and pop a second dialog.
+    e?.stopPropagation?.()
+    inputRef.current?.click()
   }
 
   function onDrop(e) {
@@ -47,14 +59,15 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
         ref={inputRef}
         type="file"
         accept={ACCEPTED}
-        onChange={(e) => handleFile(e.target.files?.[0])}
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleFile(f) }}
+        onClick={(e) => e.stopPropagation()}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
       />
       {!filename && (
         <div
-          onClick={() => inputRef.current?.click()}
+          onClick={pickFile}
           onDrop={onDrop}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
@@ -91,7 +104,7 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
             <div className="flex shrink-0 gap-2">
               <button
                 type="button"
-                onClick={() => inputRef.current?.click()}
+                onClick={pickFile}
                 className="rounded-md border border-white/10 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/5"
               >
                 Replace
@@ -110,6 +123,23 @@ export default function FileUpload({ onText, currentTextLength = 0, hint }) {
       {hint && <div className="mt-2 text-[11px] text-slate-500">{hint}</div>}
     </div>
   )
+}
+
+// Best-effort title pull: first non-empty line of the parsed text if it looks
+// like a title (short-ish, no terminal sentence punctuation, no all caps boiler),
+// otherwise strip the file-name extension.
+function deriveTitle(text, fname) {
+  const txt = String(text || '').replace(/\r/g, '')
+  for (const raw of txt.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    if (line.length < 12 || line.length > 220) continue
+    if (/^(abstract|background|introduction|methods?|materials|results?|discussion|conclusions?|keywords|key words|received|accepted|copyright|doi:|©|figure|table)\b/i.test(line)) continue
+    if (/[.!?]$/.test(line) && line.split(' ').length > 30) continue
+    return line.replace(/\s+/g, ' ')
+  }
+  const base = String(fname || '').replace(/\.(pdf|docx?|txt)$/i, '').replace(/[_-]+/g, ' ').trim()
+  return base && base.length >= 4 ? base : null
 }
 
 async function parseFile(file) {

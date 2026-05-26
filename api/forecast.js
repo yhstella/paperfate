@@ -127,14 +127,21 @@ export default async function handler(req, res) {
   try {
     const normalizedMode = mode === 'abstract' ? 'Q100' : mode === 'full' ? 'Q500' : mode
     const hasLlmKey = !!(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY)
-    const extractorMode = process.env.PAPERFATE_EXTRACTOR || 'codex_deterministic'
-    const useDeterministic = extractorMode !== 'llm' || !hasLlmKey
+    // Prefer LLM whenever a key is present so top-tier abstracts get differentiated
+    // Q-scoring; only fall back to the deterministic rule pre-pass when no key is
+    // configured OR the operator explicitly forces it via PAPERFATE_EXTRACTOR.
+    const explicitMode = process.env.PAPERFATE_EXTRACTOR
+    const useDeterministic =
+      !hasLlmKey ||
+      explicitMode === 'deterministic' ||
+      explicitMode === 'codex_deterministic'
     const extraction = useDeterministic
       ? forecastManuscriptDeterministic(manuscript, article_type, { mode: normalizedMode })
       : await forecastManuscript(manuscript, article_type, {
           mode: normalizedMode === 'auto' ? undefined : normalizedMode,
           concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 10,
         })
+    if (extraction) extraction.extractor_used = useDeterministic ? 'deterministic' : 'llm'
     const inferenceOpts = {
       targetJournal: target_journal || {},
       authorFeatures: author_features || {},
