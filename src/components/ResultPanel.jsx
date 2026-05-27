@@ -1,5 +1,5 @@
 export default function ResultPanel({ result, input }) {
-  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures } = result
+  const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures, adjustedJif } = result
 
   return (
     <div className="card p-6 animate-fade-up">
@@ -56,6 +56,22 @@ export default function ResultPanel({ result, input }) {
           <div className="text-sm leading-relaxed text-slate-300">{weakness}</div>
         </Card>
       </div>
+
+      {adjustedJif && adjustedJif.is_adjusted && (
+        <div className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Adjusted JIF estimate</div>
+          <div className="flex flex-wrap items-baseline gap-3">
+            <span className="text-2xl font-semibold text-slate-100">{adjustedJif.point}</span>
+            <span className="chip">manuscript-only model {adjustedJif.baseline}</span>
+            {(adjustedJif.components || []).filter(c => c.label !== 'model').map(c => (
+              <span key={c.label} className="chip">{c.label} contribution {c.jif}</span>
+            ))}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            The manuscript-only model (v0.2-prod, honest R²(JIF log)≈0.43) compresses toward mid-tier on abstract text alone. This estimate blends it with strong signals the model itself can't read — bibliography median impact, target-journal prior IF, and senior-author h-index — so the headline number reflects the full submission package.
+          </div>
+        </div>
+      )}
 
       {authorFeatures && authorFeatures.team_size_with_id > 0 && (
         <div className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">

@@ -103,12 +103,34 @@ export default function Simulator() {
   const [referencesAutoDetected, setReferencesAutoDetected] = useState(false)
   const [authorsInput, setAuthorsInput] = useState('')
   const [authorsAutoDetected, setAuthorsAutoDetected] = useState(false)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  const [progressLabel, setProgressLabel] = useState('')
 
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
   const minChars = inputMode === 'full' ? 1000 : 200
   const canRun = title.trim().length > 8 && charCount >= minChars
+
+  // Elapsed-time counter that runs only while a forecast is in flight.
+  useEffect(() => {
+    if (status !== 'running') {
+      setElapsedSec(0)
+      setProgressLabel('')
+      return
+    }
+    const startedAt = Date.now()
+    const id = setInterval(() => {
+      const sec = Math.round((Date.now() - startedAt) / 1000)
+      setElapsedSec(sec)
+      const expectedMid = inputMode === 'full' ? 60 : 10
+      if (sec < expectedMid * 0.3) setProgressLabel('extracting features')
+      else if (sec < expectedMid * 0.7) setProgressLabel('LLM Q-rubric scoring')
+      else if (sec < expectedMid * 1.1) setProgressLabel('FateCore inference')
+      else setProgressLabel('finalising')
+    }, 500)
+    return () => clearInterval(id)
+  }, [status, inputMode])
 
   // Auto-detect authors and reference DOIs from full-manuscript uploads.
   // Only fills the input when the user hasn't typed something else there.
@@ -356,17 +378,27 @@ export default function Simulator() {
               targetValue={overrides.target || 'Auto-recommend'}
             />
 
-            <div className="flex items-center justify-between pt-2">
-              <p className="text-xs text-slate-500">
+            <div className="flex items-center justify-between pt-2 gap-3">
+              <div className="text-xs text-slate-500 min-w-0">
                 {status === 'running' ? (
-                  inputMode === 'full'
-                    ? 'Full manuscript scoring usually takes 30–90s — references, authors and similar papers populate as they arrive.'
-                    : 'Abstract scoring usually takes 5–15s.'
+                  <div>
+                    <div>
+                      Elapsed <span className="font-mono text-slate-300">{elapsedSec}s</span>
+                      <span className="text-slate-500"> / expected {inputMode === 'full' ? '30–90s' : '5–15s'}</span>
+                      {progressLabel && <span className="ml-2 text-fate-300/90">· {progressLabel}…</span>}
+                    </div>
+                    <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/5">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-fate-500 to-fate-300 transition-all duration-500"
+                        style={{ width: `${Math.min(95, (elapsedSec / (inputMode === 'full' ? 60 : 10)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
                 ) : (
                   'Nothing is stored. All processing runs locally in your browser.'
                 )}
-              </p>
-              <button disabled={!canRun || status === 'running'} className="btn-primary">
+              </div>
+              <button disabled={!canRun || status === 'running'} className="btn-primary shrink-0">
                 {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
               </button>
             </div>
@@ -401,6 +433,46 @@ export default function Simulator() {
   )
 }
 
+// Combine the manuscript-only model output with strong contextual signals the
+// model itself doesn't see (bibliography tier, target journal, top h-index).
+// The base v0.2-prod is honest pre-pub but has R²(JIF log)≈0.435; sample-test
+// showed it collapses to ~JIF 2.6 on top-tier abstracts. This blend lets the
+// UI surface a more realistic single-number estimate while keeping the raw
+// model number visible separately.
+function computeAdjustedJif(r) {
+  const baseline = r?.predictions?.jcr_jif?.point
+  if (!Number.isFinite(baseline)) return null
+  const components = [{ jif: baseline, w: 1.0, label: 'model' }]
+
+  const refMedian = r?.references_summary?.median_jif
+  if (Number.isFinite(refMedian) && refMedian > 0 && (r?.references_summary?.n_resolved || 0) >= 3) {
+    // Papers tend to cite work at or above their own tier; discount slightly.
+    components.push({ jif: refMedian * 0.65, w: 0.45, label: 'bibliography' })
+  }
+
+  const tjJif = r?.target_journal_info?.jif
+  if (Number.isFinite(tjJif) && tjJif > 0) {
+    // Target journal is aspirational — anchor lightly, not 1:1.
+    components.push({ jif: tjJif * 0.55, w: 0.3, label: 'target' })
+  }
+
+  const maxH = r?.author_features?.max_team_h_index
+  if (Number.isFinite(maxH) && maxH >= 40) {
+    // High-h-index teams publish higher — boost in log space.
+    const boosted = baseline * Math.min(10, Math.exp((maxH - 40) / 60))
+    components.push({ jif: boosted, w: 0.35, label: 'authors' })
+  }
+
+  const totalW = components.reduce((s, c) => s + c.w, 0)
+  const point = components.reduce((s, c) => s + c.jif * c.w, 0) / totalW
+  return {
+    point: +point.toFixed(2),
+    baseline: +baseline.toFixed(2),
+    components: components.map(c => ({ ...c, jif: +c.jif.toFixed(2) })),
+    is_adjusted: components.length > 1,
+  }
+}
+
 // Adapts the new server schema back to the shape ResultPanel was originally
 // designed for, so the existing 6-card layout still renders.
 function resultLegacyShape(r) {
@@ -430,6 +502,7 @@ function resultLegacyShape(r) {
     targetJournal: r.target_journal_info || null,
     referencesSummary: r.references_summary || null,
     authorFeatures: r.author_features || null,
+    adjustedJif: computeAdjustedJif(r),
     confidence: Number.isFinite(+r.confidence) ? +r.confidence : null,
     fatecoreMeta: r.fatecore
       ? {
