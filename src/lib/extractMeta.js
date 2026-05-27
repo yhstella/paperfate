@@ -154,6 +154,72 @@ export function extractEndpointHint(text) {
   return hits.length ? { value: hits, confidence: 0.8 } : null
 }
 
+// Authors typically appear under the title in PDFs / DOCX exports.
+// Heuristic: take the lines between the title and the abstract that look like
+// a comma-separated list of "First Last", "F. Last", or "Last F." names with
+// optional superscripts / affiliation marks.
+export function extractAuthors(text) {
+  const raw = String(text || '').replace(/\r/g, '')
+  if (!raw) return []
+  // Look only at the first ~3,000 chars (cover-page area)
+  const head = raw.slice(0, 3000)
+  // Cut at "Abstract" / "Introduction" / "Background"
+  const cut = head.search(/\n\s*(abstract|introduction|background|summary)\b/i)
+  const region = cut > 0 ? head.slice(0, cut) : head
+  // Drop title line(s) at the very top — take the largest comma-joined block
+  // of name-like tokens in the region.
+  const NAME = /[A-Z][a-zA-Z'’\-]+(?:\s+[A-Z](?:\.|[a-zA-Z'’\-]+))+/g
+  const lines = region.split('\n').map(l => l.trim()).filter(Boolean)
+  // Score each line by how many name-like tokens it contains
+  const scored = lines.map(line => {
+    // Remove superscripts / affiliation digits / commas / 'and' / '&'
+    const cleaned = line
+      .replace(/\d+[\s,]*/g, ' ')
+      .replace(/†|\*|‡|§|¶/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const matches = cleaned.match(NAME) || []
+    return { line, cleaned, matches, count: matches.length }
+  })
+  const best = scored
+    .filter(s => s.count >= 2 && s.cleaned.length <= 600)
+    .sort((a, b) => b.count - a.count)[0]
+  if (!best) return []
+  const names = (best.cleaned.match(NAME) || [])
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(s => s.length >= 4 && s.length <= 60)
+  // Dedup preserving order
+  const seen = new Set()
+  const out = []
+  for (const n of names) {
+    const k = n.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(n)
+    if (out.length >= 25) break
+  }
+  return out
+}
+
+// DOIs are easy: just scan for the canonical 10.xxxx/... pattern.
+const DOI_RE = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9<>]+/gi
+export function extractDois(text, max = 50) {
+  if (!text) return []
+  const matches = String(text).match(DOI_RE) || []
+  const seen = new Set()
+  const out = []
+  for (const m of matches) {
+    // Strip trailing punctuation that often clings to inline DOIs
+    const doi = m.toLowerCase().replace(/[.,;)]+$/g, '')
+    if (seen.has(doi)) continue
+    if (!/^10\.\d{4,9}\//.test(doi)) continue
+    seen.add(doi)
+    out.push(doi)
+    if (out.length >= max) break
+  }
+  return out
+}
+
 // One-shot wrapper — call this once and pass the result to the simulator.
 export function extractAll(text) {
   return {

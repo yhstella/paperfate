@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 
 const ACCEPTED = '.txt,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export default function FileUpload({ onText, onTitle, currentTextLength = 0, hint }) {
+  const inputId = useId()
   const inputRef = useRef(null)
   const [filename, setFilename] = useState(null)
   const [filesize, setFilesize] = useState(null)
@@ -19,7 +20,6 @@ export default function FileUpload({ onText, onTitle, currentTextLength = 0, hin
     try {
       const text = await parseFile(file)
       onText(text)
-      // If the parent didn't yet have a title, derive one from the file or text.
       if (typeof onTitle === 'function') {
         const derived = deriveTitle(text, file.name)
         if (derived) onTitle(derived)
@@ -31,13 +31,6 @@ export default function FileUpload({ onText, onTitle, currentTextLength = 0, hin
     } finally {
       setParsing(false)
     }
-  }
-
-  function pickFile(e) {
-    // Stop the native click from bubbling so the wrapper div doesn't re-invoke
-    // inputRef.current.click() and pop a second dialog.
-    e?.stopPropagation?.()
-    inputRef.current?.click()
   }
 
   function onDrop(e) {
@@ -55,23 +48,27 @@ export default function FileUpload({ onText, onTitle, currentTextLength = 0, hin
 
   return (
     <div>
+      {/* One hidden file input outside the click target — label triggers it, no JS click() */}
       <input
         ref={inputRef}
+        id={inputId}
         type="file"
         accept={ACCEPTED}
-        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleFile(f) }}
-        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          // Allow re-selecting the same file after Remove/Replace
+          e.target.value = ''
+          if (f) handleFile(f)
+        }}
         className="sr-only"
-        tabIndex={-1}
-        aria-hidden="true"
       />
       {!filename && (
-        <div
-          onClick={pickFile}
+        <label
+          htmlFor={inputId}
           onDrop={onDrop}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
-          className={`cursor-pointer rounded-xl border-2 border-dashed transition px-6 py-12 text-center ${
+          className={`block cursor-pointer rounded-xl border-2 border-dashed transition px-6 py-12 text-center ${
             dragOver ? 'border-fate-400/60 bg-fate-500/[0.06]' : 'border-white/10 bg-ink-900/40 hover:border-white/20'
           }`}
         >
@@ -80,7 +77,7 @@ export default function FileUpload({ onText, onTitle, currentTextLength = 0, hin
             Drop your manuscript here, or <span className="text-fate-300 underline-offset-4 hover:underline">click to browse</span>
           </div>
           <div className="mt-1 text-xs text-slate-500">PDF · DOCX · TXT · processed locally in your browser</div>
-        </div>
+        </label>
       )}
       {filename && (
         <div className="rounded-xl border border-white/10 bg-ink-900/60 p-4">
@@ -102,13 +99,12 @@ export default function FileUpload({ onText, onTitle, currentTextLength = 0, hin
               </div>
             </div>
             <div className="flex shrink-0 gap-2">
-              <button
-                type="button"
-                onClick={pickFile}
-                className="rounded-md border border-white/10 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/5"
+              <label
+                htmlFor={inputId}
+                className="cursor-pointer rounded-md border border-white/10 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/5"
               >
                 Replace
-              </button>
+              </label>
               <button
                 type="button"
                 onClick={reset}

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures } from '../lib/forecastClient.js'
-import { extractAll } from '../lib/extractMeta.js'
+import { extractAll, extractAuthors, extractDois } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
 import FileUpload from './FileUpload.jsx'
@@ -100,13 +100,37 @@ export default function Simulator() {
 
   const [targetJournalInput, setTargetJournalInput] = useState('')
   const [referencesInput, setReferencesInput] = useState('')
+  const [referencesAutoDetected, setReferencesAutoDetected] = useState(false)
   const [authorsInput, setAuthorsInput] = useState('')
+  const [authorsAutoDetected, setAuthorsAutoDetected] = useState(false)
 
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
   const minChars = inputMode === 'full' ? 1000 : 200
   const canRun = title.trim().length > 8 && charCount >= minChars
+
+  // Auto-detect authors and reference DOIs from full-manuscript uploads.
+  // Only fills the input when the user hasn't typed something else there.
+  useEffect(() => {
+    if (inputMode !== 'full') return
+    if (!text || text.length < 500) return
+    if (!authorsInput.trim() || authorsAutoDetected) {
+      const found = extractAuthors(text)
+      if (found.length >= 2) {
+        setAuthorsInput(found.join('\n'))
+        setAuthorsAutoDetected(true)
+      }
+    }
+    if (!referencesInput.trim() || referencesAutoDetected) {
+      const dois = extractDois(text, 50)
+      if (dois.length >= 1) {
+        setReferencesInput(dois.join('\n'))
+        setReferencesAutoDetected(true)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, inputMode])
 
   function get(key, fallback) {
     if (overrides[key] && overrides[key] !== 'Auto-detect' && overrides[key] !== 'Auto-recommend') return overrides[key]
@@ -158,34 +182,54 @@ export default function Simulator() {
         .filter(s => s.length >= 3)
         .slice(0, 25)
 
-      // First, resolve author features so the forecast call can use h-index inputs.
-      let authorFeatures = null
-      if (authorNames.length) {
-        authorFeatures = await fetchAuthorFeatures(authorNames)
-        if (authorFeatures) {
-          input.author_features = {
-            first_author_h_index: authorFeatures.first_author_h_index,
-            last_author_h_index: authorFeatures.last_author_h_index,
-            max_team_h_index: authorFeatures.max_team_h_index,
-            median_team_h_index: authorFeatures.median_team_h_index,
-            team_size_with_id: authorFeatures.team_size_with_id,
-          }
-        }
-      }
+      // All five lookups in parallel. The author-features call resolves in
+      // ~1–2 s while /api/forecast resolves the heavy LLM extraction; running
+      // them concurrently shaves a few seconds off perceived latency.
+      const [authorFeatures, similars, targetJournalInfo, referencesSummary, rNoAuthor] =
+        await Promise.all([
+          authorNames.length ? fetchAuthorFeatures(authorNames) : Promise.resolve(null),
+          fetchSimilar({ title, abstract: text }),
+          tjQuery ? fetchJournalInfo(tjQuery) : Promise.resolve(null),
+          refDois.length ? fetchReferencesSummary(refDois) : Promise.resolve(null),
+          forecast(input, { fallbackMock: true }),
+        ])
 
-      const [r, similars, targetJournalInfo, referencesSummary] = await Promise.all([
-        forecast(input, { fallbackMock: true }),
-        fetchSimilar({ title, abstract: text }),
-        tjQuery ? fetchJournalInfo(tjQuery) : Promise.resolve(null),
-        refDois.length ? fetchReferencesSummary(refDois) : Promise.resolve(null),
-      ])
+      // First-pass result: render the heavy forecast we already have plus the
+      // light lookups. The user sees something within the longest single call.
       setResult({
-        ...r,
+        ...rNoAuthor,
         similar_papers: similars,
         target_journal_info: targetJournalInfo,
         references_summary: referencesSummary,
         author_features: authorFeatures,
       })
+
+      // Second pass: if author features came back, re-run the (now-cached) LLM
+      // extraction with author_features wired in so v0.2-prod can pull on the
+      // h-index inputs. Only fire when authors actually resolved.
+      if (authorFeatures && Number.isFinite(authorFeatures.first_author_h_index)) {
+        input.author_features = {
+          first_author_h_index: authorFeatures.first_author_h_index,
+          last_author_h_index: authorFeatures.last_author_h_index,
+          max_team_h_index: authorFeatures.max_team_h_index,
+          median_team_h_index: authorFeatures.median_team_h_index,
+          team_size_with_id: authorFeatures.team_size_with_id,
+        }
+        forecast(input, { fallbackMock: true })
+          .then(r2 => {
+            if (!r2) return
+            setResult(prev => ({
+              ...prev,
+              ...r2,
+              // Keep the parallel lookups we already paid for
+              similar_papers: prev?.similar_papers || similars,
+              target_journal_info: prev?.target_journal_info || targetJournalInfo,
+              references_summary: prev?.references_summary || referencesSummary,
+              author_features: authorFeatures,
+            }))
+          })
+          .catch(err => console.warn('author-aware refine failed:', err.message))
+      }
       setStatus('done')
       setTimeout(() => {
         document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -265,7 +309,6 @@ export default function Simulator() {
                   onText={setText}
                   onTitle={(t) => { if (!title.trim()) setTitle(t) }}
                   currentTextLength={charCount}
-                  hint="Headings, tables, and references are extracted as plain text. Figures are skipped."
                 />
               ) : (
                 <textarea
@@ -284,36 +327,26 @@ export default function Simulator() {
                 placeholder="e.g. The Lancet, JAMA, 0028-4793"
                 className="input"
               />
-              <div className="mt-1 text-[11px] text-slate-500">
-                Looks up prior-year impact factor and tier so the journey can anchor on a real target.
-                Leave blank to let PaperFate recommend.
-              </div>
             </Field>
 
-            <Field label="Authors (optional, one per line — first to last)">
+            <Field label={`Authors${authorsAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}>
               <textarea
                 value={authorsInput}
-                onChange={e => setAuthorsInput(e.target.value)}
-                rows={3}
-                placeholder="Jane Smith&#10;John Doe&#10;Bertram Pitt"
+                onChange={e => { setAuthorsInput(e.target.value); setAuthorsAutoDetected(false) }}
+                rows={2}
+                placeholder="Jane Smith&#10;John Doe"
                 className="input resize-y"
               />
-              <div className="mt-1 text-[11px] text-slate-500">
-                Up to 25 names. Each is resolved through OpenAlex to feed first/last/max/median author h-index into FateCore. Order matters: first line → first author, last line → senior author.
-              </div>
             </Field>
 
-            <Field label="Reference DOIs (optional, one per line)">
+            <Field label={`Reference DOIs${referencesAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}>
               <textarea
                 value={referencesInput}
-                onChange={e => setReferencesInput(e.target.value)}
-                rows={3}
-                placeholder="10.1056/NEJMoa1504720&#10;10.1016/S0140-6736(18)32590-X"
+                onChange={e => { setReferencesInput(e.target.value); setReferencesAutoDetected(false) }}
+                rows={2}
+                placeholder="10.1056/NEJMoa1504720"
                 className="input resize-y"
               />
-              <div className="mt-1 text-[11px] text-slate-500">
-                Up to 50 DOIs. Each is resolved through OpenAlex to surface the median impact factor, top journals, and field distribution of your bibliography.
-              </div>
             </Field>
 
             <DetectedPanel
@@ -325,7 +358,13 @@ export default function Simulator() {
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-xs text-slate-500">
-                Nothing is stored. All processing runs locally in your browser.
+                {status === 'running' ? (
+                  inputMode === 'full'
+                    ? 'Full manuscript scoring usually takes 30–90s — references, authors and similar papers populate as they arrive.'
+                    : 'Abstract scoring usually takes 5–15s.'
+                ) : (
+                  'Nothing is stored. All processing runs locally in your browser.'
+                )}
               </p>
               <button disabled={!canRun || status === 'running'} className="btn-primary">
                 {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
