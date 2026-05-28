@@ -478,12 +478,13 @@ function topTierAbstractSignature(text) {
   return score
 }
 
-// Map a top-tier score (≈0–5) to a multiplier on the model baseline.
+// Map a top-tier score (≈0–6) to a multiplier on the model baseline.
 // Calibrated so a strong NEJM-class signature (Phase 3 + RCT + 1000+ pts +
-// primary endpoint) pushes the baseline up ~10×, modest signature ~3×.
+// primary endpoint + reg + stats) pushes the baseline up ~22×, modest
+// signature (score 2) ≈3×.
 function topTierMultiplier(score) {
   if (score < 1.5) return 1.0
-  return Math.min(15, 1 + Math.pow(score - 1, 1.6))
+  return Math.min(25, 1 + Math.pow(score - 1, 2.2))
 }
 
 function computeAdjustedJif(r, manuscriptText = '') {
@@ -497,7 +498,7 @@ function computeAdjustedJif(r, manuscriptText = '') {
   const sig = topTierAbstractSignature(`${manuscriptText} ${r?.title || ''}`)
   if (sig >= 1.5) {
     const mul = topTierMultiplier(sig)
-    components.push({ jif: baseline * mul, w: 0.5, label: `top-tier signal ${sig.toFixed(1)}` })
+    components.push({ jif: baseline * mul, w: 0.75, label: `top-tier signal ${sig.toFixed(1)}` })
   }
 
   // Similar-papers venue IF — strongest abstract-only signal. OpenAlex
