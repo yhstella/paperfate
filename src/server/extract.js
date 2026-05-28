@@ -171,8 +171,12 @@ function scoreFromRule(item, ruleResult) {
       return { score: 3, rationale: `Reporting guideline(s) mentioned: ${v.join(', ')}.` }
     }
   }
-  // Default: presence of a verifiable signal → score 4 (addressed with method)
-  return { score: 4, rationale: 'Rule-extracted signal present in manuscript.' }
+  // Default: a rule found a signal but cannot tell how rigorously it was
+  // applied. Returning null defers to the LLM, which sees the calibration
+  // anchors and can produce a tier-discriminating score. Previously this
+  // hard-coded score=4, which collapsed q_mean to ~4.0 across all tiers
+  // and was the root cause of the JIF-2.8-for-everything bug.
+  return null
 }
 
 function runRulePrePass(items, manuscript) {
