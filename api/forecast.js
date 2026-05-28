@@ -144,15 +144,23 @@ export default async function handler(req, res) {
       !hasLlmKey ||
       explicitMode === 'deterministic' ||
       explicitMode === 'codex_deterministic'
-    // Vercel Pro plan: 300s budget. Q500 ~500 items, rule pre-pass leaves
-    // ~350-400 to the LLM. Concurrency 25 keeps Gemini Flash under 1k RPM
-    // while finishing inside the 300s window. Hobby plan should override via
-    // PAPERFATE_CONCURRENCY=10.
+    // Vercel Pro plan: 300s budget. The real latency knob is the Gemini
+    // client's RPM limit (default free-tier 9 = 6.67s gap between calls;
+    // Q500's 44 sequential batches alone = 290s of forced gaps before any
+    // LLM time). Paid tier supports 1k RPM; we run the client at 120 RPM
+    // with batchSize 25 — Q500 needs ~14 batches × ~8s = ~110s.
+    const isPaidGemini = process.env.GEMINI_PAID_TIER !== '0'
+    const geminiOpts = {
+      rpm:        Number(process.env.GEMINI_RPM) || (isPaidGemini ? 120 : 9),
+      batchSize:  Number(process.env.GEMINI_BATCH_SIZE) || 25,
+      isFreeTier: !isPaidGemini,
+    }
     const extraction = useDeterministic
       ? forecastManuscriptDeterministic(manuscript, article_type, { mode: normalizedMode })
       : await forecastManuscript(manuscript, article_type, {
           mode: normalizedMode === 'auto' ? undefined : normalizedMode,
           concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 35,
+          geminiOpts,
         })
     if (extraction) extraction.extractor_used = useDeterministic ? 'deterministic' : 'llm'
     const inferenceOpts = {
