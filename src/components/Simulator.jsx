@@ -451,18 +451,22 @@ function computeAdjustedJif(r) {
   if (!Number.isFinite(baseline)) return null
   const components = [{ jif: baseline, w: 1.0, label: 'model' }]
 
-  // Similar-papers venue IF — strongest abstract-only signal: an NEJM-class
-  // abstract retrieves NEJM/Lancet/JAMA neighbours, so their median IF
-  // anchors the blend toward the right tier even when no refs/authors entered.
-  const similarJifs = (r?.similar_papers || [])
-    .map(s => +s.if)
-    .filter(j => Number.isFinite(j) && j > 0)
-    .slice(0, 5)
-  if (similarJifs.length >= 2) {
-    const simMedian = median(similarJifs)
-    // Discount: retrieval returns prototypes that may be more famous than the
-    // author's own work, but the tier signal is strong.
-    components.push({ jif: simMedian * 0.55, w: 0.55, label: 'similar papers' })
+  // Similar-papers venue IF — strongest abstract-only signal. OpenAlex
+  // retrieval often returns a mix of the original landmark paper and low-IF
+  // reviews/preprints citing it; the median is dragged down by those reviews.
+  // We anchor on the top-3 (highest-relevance / first-returned) and use a
+  // top-tilted aggregate so an NEJM/Lancet/JAMA match dominates.
+  const similars = (r?.similar_papers || [])
+    .map(s => ({ if: +s.if, year: +s.year }))
+    .filter(s => Number.isFinite(s.if) && s.if > 0)
+  if (similars.length >= 2) {
+    const topJifs = similars.slice(0, 3).map(s => s.if).sort((a, b) => b - a)
+    const topMax = topJifs[0]
+    const topMed = topJifs.length === 1 ? topJifs[0] : (topJifs[0] + topJifs[topJifs.length - 1]) / 2
+    // 60/40 mix of top-max and top-median — a single high-IF hit lifts the
+    // signal but doesn't over-anchor if everything else is mid-tier.
+    const simAnchor = 0.6 * topMax + 0.4 * topMed
+    components.push({ jif: simAnchor * 0.6, w: 0.6, label: 'similar papers' })
   }
 
   const refMedian = r?.references_summary?.median_jif
