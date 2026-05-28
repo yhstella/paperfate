@@ -13,6 +13,17 @@ Hard rules:
 6. Score = the index of the rubric anchor that best matches the evidence.
 7. OUTPUT JSON ONLY. No prose, no markdown fences.
 
+CALIBRATION — anchor levels must reflect the published-literature distribution, NOT how "ok" the manuscript looks in isolation. You are calibrating against ALL biomedical papers, including those in elite journals. Do not default to "addressed = 4".
+
+  Score 5 — "Exemplary". The top ~5% of published biomedical work. Requires the FULL set of features named in the rubric anchor (e.g. explicit gap statement AND formal PICO AND stable framing). NEJM / Lancet / JAMA / Nature Medicine / top-tier specialty work typically reaches 5 on most rubric domains. Most manuscripts do not.
+  Score 4 — "Strong, well-executed". A top-quartile specialty-journal manuscript (typical IF 10–30). Most of the rubric features present, with at most minor omissions.
+  Score 3 — "Adequate, typical specialty". The median published paper (IF roughly 3–8). Core feature stated but lacking elements of the rubric anchor.
+  Score 2 — "Limited / partial". Feature present but ambiguous, single-line, or with material gaps.
+  Score 1 — "Implied only". The reader has to infer; not directly stated.
+  Score 0 — "Absent or contradicted".
+
+When evidence sits between two anchors, ask: "would this exact wording and reporting density survive peer review at NEJM?" If yes → 5. If yes at Lancet Resp / Circulation / JAMA Specialty / similar → 4. If yes at a generic IF-5 specialty → 3. If borderline even at IF-2 → 2. A phase-3 international multicenter RCT with primary endpoint and CONSORT-style reporting differs MEANINGFULLY from a 200-patient single-center retrospective even when both "address" the same rubric item — that difference must show up in the score.
+
 Output schema (strict):
 {
   "id":               string,             // item id, echoed
