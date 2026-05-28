@@ -107,13 +107,22 @@ export default async function handler(req, res) {
   if (!abstract || typeof abstract !== 'string' || abstract.trim().length < 200)
     return bad(res, 400, 'missing_or_short_abstract', 'abstract must be ≥200 chars')
 
+  // Cap per-section input length so each LLM call's prompt stays bounded.
+  // Q500 forecasts iterate ~350-450 LLM items, each receiving the full
+  // section block, so input tokens dominate latency. 8K chars per section
+  // ≈ 2K tokens; manuscripts longer than this rarely add Q500-relevant
+  // signal that isn't already in abstract + methods + results headers.
+  const SECTION_CAP   = 8000
+  const FULLTEXT_CAP  = 24000
+  const cap = (s, n) => String(s || '').slice(0, n)
+
   const manuscript = {
     title: title.trim(),
     abstract: abstract.trim(),
-    ...(methods    && { methods }),
-    ...(results    && { results }),
-    ...(discussion && { discussion }),
-    ...(full_text  && { full_text }),
+    ...(methods    && { methods:    cap(methods,    SECTION_CAP) }),
+    ...(results    && { results:    cap(results,    SECTION_CAP) }),
+    ...(discussion && { discussion: cap(discussion, SECTION_CAP) }),
+    ...(full_text  && { full_text:  cap(full_text,  FULLTEXT_CAP) }),
     ...((Array.isArray(authors) || typeof authors === 'string') && { authors }),
     ...(Number.isFinite(Number(year)) && { year: Number(year) }),
     ...(first_affiliation && { first_affiliation }),
@@ -143,7 +152,7 @@ export default async function handler(req, res) {
       ? forecastManuscriptDeterministic(manuscript, article_type, { mode: normalizedMode })
       : await forecastManuscript(manuscript, article_type, {
           mode: normalizedMode === 'auto' ? undefined : normalizedMode,
-          concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 25,
+          concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 35,
         })
     if (extraction) extraction.extractor_used = useDeterministic ? 'deterministic' : 'llm'
     const inferenceOpts = {
