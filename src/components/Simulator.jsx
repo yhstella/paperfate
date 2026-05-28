@@ -448,58 +448,16 @@ function median(arr) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-// Detect text patterns that strongly correlate with NEJM/Lancet/JAMA-class
-// publication. None of these is a guarantee, but together they discriminate
-// landmark RCTs from typical mid-tier work and are signals the v0.2-prod
-// LightGBM regressor doesn't pick up from raw Q-scores alone.
-function topTierAbstractSignature(text) {
-  const blob = String(text || '').toLowerCase()
-  if (blob.length < 400) return 0
-  let score = 0
-  const has = re => re.test(blob)
-  // Trial-level signal
-  if (has(/\bphase\s*3\b|\bphase\s*iii\b/)) score += 1.0
-  if (has(/randomi[sz]ed|double-?blind|placebo-?controlled/)) score += 1.0
-  if (has(/multicent(?:re|er)|international|multinational|multi-?national/)) score += 0.7
-  // Outcome rigour
-  if (has(/primary (?:composite |end ?point|outcome)/)) score += 0.6
-  if (has(/95% (?:ci|confidence interval)|hazard ratio|relative risk|odds ratio/)) score += 0.6
-  if (has(/intention[- ]to[- ]treat|per[- ]protocol/)) score += 0.4
-  // Scale
-  const nMatch = blob.match(/\b(\d[\d,]{2,6})\s*(?:patients|participants|subjects|adults|children)\b/)
-  if (nMatch) {
-    const n = parseInt(nMatch[1].replace(/,/g, ''), 10)
-    if (n >= 1000) score += 1.0
-    else if (n >= 500) score += 0.6
-    else if (n >= 200) score += 0.3
-  }
-  // Registration / reproducibility
-  if (has(/clinicaltrials\.gov|nct\d{8}/)) score += 0.4
-  return score
-}
-
-// Map a top-tier score (≈0–6) to a multiplier on the model baseline.
-// Calibrated so a strong NEJM-class signature (Phase 3 + RCT + 1000+ pts +
-// primary endpoint + reg + stats) pushes the baseline up ~22×, modest
-// signature (score 2) ≈3×.
-function topTierMultiplier(score) {
-  if (score < 1.5) return 1.0
-  return Math.min(25, 1 + Math.pow(score - 1, 2.2))
-}
-
 function computeAdjustedJif(r, manuscriptText = '') {
   const baseline = r?.predictions?.jcr_jif?.point
   if (!Number.isFinite(baseline)) return null
   const components = [{ jif: baseline, w: 1.0, label: 'model' }]
 
-  // Abstract-only top-tier signature — rescues NEJM/Lancet-class abstracts
-  // that v0.2-prod compresses into mid-tier (sample-test showed JIF ~2.6
-  // flat predictor for NEJM-published RCT abstracts).
-  const sig = topTierAbstractSignature(`${manuscriptText} ${r?.title || ''}`)
-  if (sig >= 1.5) {
-    const mul = topTierMultiplier(sig)
-    components.push({ jif: baseline * mul, w: 0.75, label: `top-tier signal ${sig.toFixed(1)}` })
-  }
+  // NB: the previous build had a regex-based "top-tier signature" multiplier
+  // here. It was removed because it amounted to cosmetic keyword matching,
+  // not real manuscript-level reasoning. Only signals derived from real
+  // user input (references, target journal, authors) or external retrieval
+  // (similar papers) contribute to the blend below.
 
   // Similar-papers venue IF — strongest abstract-only signal. OpenAlex
   // retrieval often returns a mix of the original landmark paper and low-IF
