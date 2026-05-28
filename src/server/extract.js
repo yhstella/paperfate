@@ -171,11 +171,56 @@ function scoreFromRule(item, ruleResult) {
       return { score: 3, rationale: `Reporting guideline(s) mentioned: ${v.join(', ')}.` }
     }
   }
-  // Default: a rule found a signal but cannot tell how rigorously it was
-  // applied. Returning null defers to the LLM, which sees the calibration
-  // anchors and can produce a tier-discriminating score. Previously this
-  // hard-coded score=4, which collapsed q_mean to ~4.0 across all tiers
-  // and was the root cause of the JIF-2.8-for-everything bug.
+  // Sample size — magnitude-aware: NEJM-class trials usually enroll 1k–20k,
+  // mid-tier specialty often 100–500, single-center pilots <100.
+  if (item.id === 'POPUL_005' || item.id === 'DESIGN_005' || item.id === 'STATS_021') {
+    const n = Number(ruleResult.value)
+    if (Number.isFinite(n)) {
+      if (n >= 5000) return { score: 5, rationale: `N=${n.toLocaleString()} (very large, registry-/trial-class sample).` }
+      if (n >= 1000) return { score: 4, rationale: `N=${n.toLocaleString()} (large, well-powered).` }
+      if (n >=  300) return { score: 3, rationale: `N=${n.toLocaleString()} (typical specialty-cohort sample).` }
+      if (n >=  100) return { score: 2, rationale: `N=${n} (limited sample).` }
+      return         { score: 1, rationale: `N=${n} (small sample, underpowered for most endpoints).` }
+    }
+  }
+  // Multicenter strengthened: international + many centers signals NEJM-tier.
+  if (item.id === 'DESIGN_011' || item.id === 'DESIGN_012') {
+    const v = ruleResult.value
+    if (v?.international && (v?.count >= 10)) {
+      return { score: 5, rationale: `International multicenter (${v.count} centers).` }
+    }
+    if (v?.count >= 3) {
+      return { score: 4, rationale: `Multicenter (${v.count} centers).` }
+    }
+    if (v?.multicenter) {
+      return { score: 3, rationale: 'Multicenter design stated.' }
+    }
+  }
+  // AUC magnitude
+  if (item.id === 'AIPRED_015' || item.id === 'EXTV_008') {
+    const v = Number(ruleResult.value)
+    if (Number.isFinite(v)) {
+      if (v >= 0.90) return { score: 5, rationale: `Excellent discrimination (AUC ${v}).` }
+      if (v >= 0.80) return { score: 4, rationale: `Good discrimination (AUC ${v}).` }
+      if (v >= 0.70) return { score: 3, rationale: `Acceptable discrimination (AUC ${v}).` }
+      return         { score: 2, rationale: `Limited discrimination (AUC ${v}).` }
+    }
+  }
+  // Follow-up duration
+  if (item.id === 'DESIGN_017') {
+    const v = Number(ruleResult.value)
+    if (Number.isFinite(v)) {
+      if (v >= 60) return { score: 5, rationale: `≥5 year follow-up (${v} months).` }
+      if (v >= 24) return { score: 4, rationale: `≥2 year follow-up (${v} months).` }
+      if (v >= 12) return { score: 3, rationale: `≥1 year follow-up (${v} months).` }
+      if (v >=  3) return { score: 2, rationale: `Short follow-up (${v} months).` }
+      return         { score: 1, rationale: `Very short follow-up (${v} months).` }
+    }
+  }
+  // Default: rule found a signal but cannot grade rigour. Returning null
+  // defers to the LLM, which sees the calibration anchors and can produce
+  // a tier-discriminating score. Previously this hard-coded score=4,
+  // collapsing q_mean to ~4.0 across all tiers.
   return null
 }
 
