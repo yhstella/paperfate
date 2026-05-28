@@ -439,26 +439,44 @@ export default function Simulator() {
 // showed it collapses to ~JIF 2.6 on top-tier abstracts. This blend lets the
 // UI surface a more realistic single-number estimate while keeping the raw
 // model number visible separately.
+function median(arr) {
+  if (!arr.length) return null
+  const s = [...arr].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
 function computeAdjustedJif(r) {
   const baseline = r?.predictions?.jcr_jif?.point
   if (!Number.isFinite(baseline)) return null
   const components = [{ jif: baseline, w: 1.0, label: 'model' }]
 
+  // Similar-papers venue IF — strongest abstract-only signal: an NEJM-class
+  // abstract retrieves NEJM/Lancet/JAMA neighbours, so their median IF
+  // anchors the blend toward the right tier even when no refs/authors entered.
+  const similarJifs = (r?.similar_papers || [])
+    .map(s => +s.if)
+    .filter(j => Number.isFinite(j) && j > 0)
+    .slice(0, 5)
+  if (similarJifs.length >= 2) {
+    const simMedian = median(similarJifs)
+    // Discount: retrieval returns prototypes that may be more famous than the
+    // author's own work, but the tier signal is strong.
+    components.push({ jif: simMedian * 0.55, w: 0.55, label: 'similar papers' })
+  }
+
   const refMedian = r?.references_summary?.median_jif
   if (Number.isFinite(refMedian) && refMedian > 0 && (r?.references_summary?.n_resolved || 0) >= 3) {
-    // Papers tend to cite work at or above their own tier; discount slightly.
     components.push({ jif: refMedian * 0.65, w: 0.45, label: 'bibliography' })
   }
 
   const tjJif = r?.target_journal_info?.jif
   if (Number.isFinite(tjJif) && tjJif > 0) {
-    // Target journal is aspirational — anchor lightly, not 1:1.
     components.push({ jif: tjJif * 0.55, w: 0.3, label: 'target' })
   }
 
   const maxH = r?.author_features?.max_team_h_index
   if (Number.isFinite(maxH) && maxH >= 40) {
-    // High-h-index teams publish higher — boost in log space.
     const boosted = baseline * Math.min(10, Math.exp((maxH - 40) / 60))
     components.push({ jif: boosted, w: 0.35, label: 'authors' })
   }

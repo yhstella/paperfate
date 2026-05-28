@@ -15,9 +15,27 @@ export default function ResultPanel({ result, input }) {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card title="Expected journal tier" tone="primary">
-          <div className="text-2xl font-semibold">{tier.range}</div>
-          <div className="mt-1 text-xs text-slate-400">Best-fit: {tier.bestFit}</div>
-          <div className="mt-2 text-xs text-slate-500">Stretch: {tier.stretch}</div>
+          <div className="text-2xl font-semibold">
+            {adjustedJif && adjustedJif.is_adjusted
+              ? `JIF ${adjustedJif.point}`
+              : tier.range}
+          </div>
+          {adjustedJif && adjustedJif.is_adjusted ? (
+            <>
+              <div className="mt-1 text-xs text-slate-400">Best-fit: {tier.bestFit}</div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
+                <span className="chip">model only {adjustedJif.baseline}</span>
+                {(adjustedJif.components || []).filter(c => c.label !== 'model').map(c => (
+                  <span key={c.label} className="chip">{c.label} {c.jif}</span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-1 text-xs text-slate-400">Best-fit: {tier.bestFit}</div>
+              <div className="mt-2 text-xs text-slate-500">Stretch: {tier.stretch}</div>
+            </>
+          )}
         </Card>
 
         <Card title="Desk-reject risk">
