@@ -86,6 +86,27 @@ async function searchOpenAlex(query, mailto, limit = 10) {
   }
 }
 
+// Title-only search ranks landmark papers higher than reviews citing them.
+// Used in parallel with the abstract-text search so we always cover the
+// originating paper when the title alone is distinctive.
+async function searchOpenAlexTitle(title, mailto, limit = 6) {
+  const url = new URL('https://api.openalex.org/works')
+  url.searchParams.set('search', String(title || '').slice(0, 200))
+  url.searchParams.set('per-page', String(limit))
+  url.searchParams.set('select', 'id,doi,title,publication_year,cited_by_count,primary_location,relevance_score')
+  url.searchParams.set('filter', 'cited_by_count:>50')
+  url.searchParams.set('sort', 'relevance_score:desc')
+  url.searchParams.set('mailto', mailto)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${mailto})` }, signal: controller.signal })
+    clearTimeout(timer)
+    if (!r.ok) return null
+    return await r.json()
+  } catch { clearTimeout(timer); return null }
+}
+
 function shapeResult(work, issnIndex) {
   const loc = work.primary_location || {}
   const source = loc.source || {}
@@ -126,21 +147,38 @@ export default async function handler(req, res) {
   const query = buildQuery(title, abstract)
   const mailto = process.env.PAPERFATE_OPENALEX_MAILTO || 'beta@paperfate.com'
 
-  let raw
-  try { raw = await searchOpenAlex(query, mailto, 10) }
-  catch (e) { return bad(res, 502, 'openalex_search_failed', String(e.message || e)) }
+  // Parallel queries: abstract-text-broad + title-only-with-citation-filter.
+  // The title query reliably surfaces landmark papers ranked above reviews
+  // citing them; the abstract-text query catches papers without exact title
+  // overlap. We interleave by relevance and dedup by normalised title.
+  const [raw, titleHit] = await Promise.all([
+    searchOpenAlex(query, mailto, 10).catch(e => { return { _error: String(e.message || e) } }),
+    searchOpenAlexTitle(title, mailto, 6),
+  ])
+  if (raw?._error && !titleHit) {
+    return bad(res, 502, 'openalex_search_failed', raw._error)
+  }
 
   const ownTitleNorm = normalizeTitle(title)
   const seen = new Set()
   const filtered = []
-  for (const w of raw.results || []) {
+
+  // First, drain the title-search results; these are most likely to include
+  // the landmark paper itself (its venue anchors the tier blend downstream).
+  for (const w of (titleHit?.results || [])) {
     const t = normalizeTitle(w.title)
-    if (!t) continue
-    if (t === ownTitleNorm) continue
-    if (seen.has(t)) continue
+    if (!t || seen.has(t) || t === ownTitleNorm) continue
     seen.add(t)
     filtered.push(w)
     if (filtered.length >= 5) break
+  }
+  // Then top up with abstract-search neighbours.
+  for (const w of (raw?.results || [])) {
+    if (filtered.length >= 5) break
+    const t = normalizeTitle(w.title)
+    if (!t || seen.has(t) || t === ownTitleNorm) continue
+    seen.add(t)
+    filtered.push(w)
   }
 
   const similars = filtered.map(w => shapeResult(w, issnIndex))
