@@ -94,7 +94,9 @@ async function searchOpenAlexTitle(title, mailto, limit = 6) {
   url.searchParams.set('search', String(title || '').slice(0, 200))
   url.searchParams.set('per-page', String(limit))
   url.searchParams.set('select', 'id,doi,title,publication_year,cited_by_count,primary_location,relevance_score')
-  url.searchParams.set('filter', 'cited_by_count:>50')
+  // Don't filter on citation count — newly-published landmark papers (NEJM
+  // 2025/2026) haven't accumulated citations yet. OpenAlex relevance ordering
+  // alone is enough to surface them when the title is distinctive.
   url.searchParams.set('sort', 'relevance_score:desc')
   url.searchParams.set('mailto', mailto)
   const controller = new AbortController()
