@@ -319,6 +319,15 @@ export default function Simulator() {
               </div>
             </div>
 
+            {inputMode === 'abstract' && (
+              <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200/80">
+                Abstract-only mode: most Q500 rubric items require methods/results text, so the LLM
+                returns "indeterminate" for them. The forecast will lean heavily on objective
+                signals (sample size, design, follow-up) and external context (similar papers,
+                target journal, references). Upload the full manuscript for a methods-aware score.
+              </div>
+            )}
+
             <Field label="Title">
               <input
                 value={title} onChange={e => setTitle(e.target.value)}
