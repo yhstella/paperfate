@@ -135,11 +135,15 @@ export default async function handler(req, res) {
       !hasLlmKey ||
       explicitMode === 'deterministic' ||
       explicitMode === 'codex_deterministic'
+    // Vercel Pro plan: 300s budget. Q500 ~500 items, rule pre-pass leaves
+    // ~350-400 to the LLM. Concurrency 25 keeps Gemini Flash under 1k RPM
+    // while finishing inside the 300s window. Hobby plan should override via
+    // PAPERFATE_CONCURRENCY=10.
     const extraction = useDeterministic
       ? forecastManuscriptDeterministic(manuscript, article_type, { mode: normalizedMode })
       : await forecastManuscript(manuscript, article_type, {
           mode: normalizedMode === 'auto' ? undefined : normalizedMode,
-          concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 10,
+          concurrency: Number(process.env.PAPERFATE_CONCURRENCY) || 25,
         })
     if (extraction) extraction.extractor_used = useDeterministic ? 'deterministic' : 'llm'
     const inferenceOpts = {
