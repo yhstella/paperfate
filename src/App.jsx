@@ -8,6 +8,7 @@ import Methods from './components/Methods.jsx'
 import FAQ from './components/FAQ.jsx'
 import Footer from './components/Footer.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import SWUpdateToast from './components/SWUpdateToast.jsx'
 
 // Code-split: Compare is a heavier sibling of Simulator and most first
 // loads land on Simulator. Lazy-load it so initial JS stays lean.
@@ -92,6 +93,9 @@ export default function App() {
           <ErrorBoundary name="FAQ"><FAQ /></ErrorBoundary>
         </main>
         <Footer />
+        {/* Persists across tab switches; renders nothing unless the SW
+            signals a waiting/updated worker and the 24h snooze has elapsed. */}
+        <SWUpdateToast />
       </div>
     </ErrorBoundary>
   )
