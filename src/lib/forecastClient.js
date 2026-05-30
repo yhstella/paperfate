@@ -9,6 +9,44 @@ const SIMILAR_PATH = '/api/similar'
 const JOURNAL_INFO_PATH = '/api/journal-info'
 const REFERENCES_PATH = '/api/references'
 const AUTHOR_FEATURES_PATH = '/api/author-features'
+const ABSTRACT_QUALITY_PATH = '/api/abstract-quality'
+
+/**
+ * abstractQuality — calls /api/abstract-quality for a fast rubric check on
+ * just title + abstract (Q100 mode on the server). Returns the parsed JSON
+ * response or throws on network/HTTP failure. Light retry on transient
+ * network errors (one retry, short backoff) to match fetchForecast feel
+ * without blocking the UI for long.
+ */
+export async function abstractQuality({ title, abstract, article_type } = {}, { signal } = {}) {
+  const body = {
+    title: String(title || ''),
+    abstract: String(abstract || ''),
+    article_type: article_type || '*',
+  }
+  let lastErr = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(ABSTRACT_QUALITY_PATH, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      })
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(`/api/abstract-quality HTTP ${res.status}: ${detail.slice(0, 200)}`)
+      }
+      return await res.json()
+    } catch (err) {
+      lastErr = err
+      // Don't retry on abort or after the first retry.
+      if (err?.name === 'AbortError' || attempt >= 1) break
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
+  throw lastErr || new Error('abstractQuality failed')
+}
 
 export async function fetchAuthorFeatures(authors, { signal } = {}) {
   const clean = Array.isArray(authors)

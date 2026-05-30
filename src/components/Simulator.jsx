@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures } from '../lib/forecastClient.js'
+import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures, abstractQuality, DOMAIN_COLORS, DOMAIN_NAMES } from '../lib/forecastClient.js'
 import { extractAll, extractAuthors, extractDois } from '../lib/extractMeta.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
@@ -106,6 +106,12 @@ export default function Simulator() {
   const [elapsedSec, setElapsedSec] = useState(0)
   const [progressLabel, setProgressLabel] = useState('')
 
+  // Quick rubric check (Q100 — title + abstract only). Independent of the
+  // main forecast flow above; renders an inline preview below the button.
+  const [quickStatus, setQuickStatus] = useState('idle')
+  const [quickResult, setQuickResult] = useState(null)
+  const [quickError, setQuickError] = useState(null)
+
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
@@ -185,6 +191,53 @@ export default function Simulator() {
     setAuthorsInput('')
     setReferencesAutoDetected(false)
     setAuthorsAutoDetected(false)
+  }
+
+  // Resolve the same article_type the main forecast pass would use, so the
+  // quick check reuses the Round 1 auto-classifier output rather than
+  // re-deriving from scratch.
+  function resolveArticleType() {
+    const studyType = get('studyType', 'Other')
+    let articleType = STUDY_TYPE_TO_ARTICLE_TYPE[studyType] || '*'
+    const userStudyTypeRaw = overrides.studyType
+    const detectedStudyType = meta.studyType?.value
+    if (!userStudyTypeRaw || userStudyTypeRaw === 'Auto-detect') {
+      if (!detectedStudyType) {
+        const abs = text || ''
+        if (/\b(randomi[sz]ed|placebo-controlled|double-blind)\b/i.test(abs)) {
+          articleType = 'RCT'
+        } else if (/\bsystematic review|meta-analysis\b/i.test(abs)) {
+          articleType = 'systematic_review'
+        } else if (/\bretrospectively|chart review|electronic health record\b/i.test(abs)) {
+          articleType = 'cohort_retrospective'
+        } else if (/\bprospective cohort|longitudinal\b/i.test(abs)) {
+          articleType = 'cohort_prospective'
+        } else {
+          articleType = 'observational'
+        }
+      }
+    }
+    return articleType
+  }
+
+  async function onQuickCheck() {
+    if (!canRun || quickStatus === 'running') return
+    setQuickStatus('running')
+    setQuickResult(null)
+    setQuickError(null)
+    try {
+      const r = await abstractQuality({
+        title,
+        abstract: text,
+        article_type: resolveArticleType(),
+      })
+      setQuickResult(r)
+      setQuickStatus('done')
+    } catch (err) {
+      console.warn('abstractQuality failed:', err.message)
+      setQuickError(err.message || 'Quick check unavailable')
+      setQuickStatus('error')
+    }
   }
 
   async function onSubmit(e) {
@@ -445,10 +498,30 @@ export default function Simulator() {
                   "Text is sent to PaperFate for LLM scoring. We don't persist it after the forecast completes."
                 )}
               </div>
-              <button disabled={!canRun || status === 'running'} className="btn-primary shrink-0">
-                {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {inputMode === 'abstract' && (
+                  <button
+                    type="button"
+                    onClick={onQuickCheck}
+                    disabled={!canRun || quickStatus === 'running'}
+                    title="Lightweight rubric check on title + abstract only. Doesn't replace the full forecast."
+                    className="text-xs text-slate-300 hover:text-slate-100 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {quickStatus === 'running' ? <>Checking<Dots /></> : 'Quick rubric check'}
+                  </button>
+                )}
+                <button disabled={!canRun || status === 'running'} className="btn-primary shrink-0">
+                  {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
+                </button>
+              </div>
             </div>
+            {inputMode === 'abstract' && (quickStatus !== 'idle') && (
+              <QuickRubricPreview
+                status={quickStatus}
+                result={quickResult}
+                error={quickError}
+              />
+            )}
           </div>
         </form>
       </div>
@@ -810,6 +883,69 @@ function Bullet({ children }) {
 
 function Dots() {
   return <span className="ml-1 inline-flex w-4 justify-start"><span className="animate-pulse">…</span></span>
+}
+
+function QuickRubricPreview({ status, result, error }) {
+  if (status === 'running') {
+    return (
+      <div className="mt-2 rounded-md border border-white/5 bg-ink-900/60 p-3 text-[11px] text-slate-400 animate-pulse" style={{ maxHeight: 120 }}>
+        Running quick rubric check…
+      </div>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <div className="mt-2 rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-3 text-[11px] text-amber-200/80" style={{ maxHeight: 120 }}>
+        Quick rubric check unavailable{error ? ` — ${error.slice(0, 100)}` : ''}.
+      </div>
+    )
+  }
+  if (!result) return null
+  const overall = Number.isFinite(+result.overall_score) ? +result.overall_score : null
+  const rollup = Array.isArray(result.domain_rollup) ? result.domain_rollup.slice(0, 4) : []
+  const wallMs = Number.isFinite(+result.wall_ms) ? +result.wall_ms : null
+  const llmHealth = result.llm_health || null
+  const extractorUsed = result.extractor_used || null
+  const degraded = (llmHealth && llmHealth.status === 'degraded') || extractorUsed === 'rule_fallback'
+  return (
+    <div className="mt-2 rounded-md border border-white/5 bg-ink-900/60 p-3" style={{ maxHeight: 120, overflow: 'hidden' }}>
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="text-slate-400">Quick rubric</span>
+        {overall != null && (
+          <span className="font-mono text-slate-200">{overall.toFixed?.(0) ?? overall}</span>
+        )}
+        {degraded && (
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400"
+            title={`Degraded mode${extractorUsed ? ` (${extractorUsed})` : ''}`}
+          />
+        )}
+        {wallMs != null && (
+          <span className="ml-auto text-slate-500">{(wallMs / 1000).toFixed(1)}s</span>
+        )}
+      </div>
+      {rollup.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {rollup.map((d, i) => {
+            const code = d.domain || d.code || ''
+            const name = DOMAIN_NAMES[code] || code || '—'
+            const color = DOMAIN_COLORS[code] || '#94a3b8'
+            const score = Number.isFinite(+d.score) ? +d.score : (Number.isFinite(+d.mean) ? +d.mean : null)
+            return (
+              <span
+                key={`${code}-${i}`}
+                className="chip border text-[10px] px-1.5 py-0.5"
+                style={{ borderColor: `${color}55`, color }}
+                title={name}
+              >
+                {code}{score != null ? ` ${score.toFixed?.(0) ?? score}` : ''}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function SkeletonResult() {
