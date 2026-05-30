@@ -1,4 +1,10 @@
 {
+  "nav": {
+    "lang_label": "Language",
+    "switch_to_ko": "한국어",
+    "switch_to_en": "English",
+    "primary_navigation": "Primary navigation"
+  },
   "simulator": {
     "title": "PaperFate Simulator",
     "submit_button": "Run forecast",

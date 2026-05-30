@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
+import { t } from '../lib/i18n.js'
 
 export default function ResultPanel({ result, input }) {
   const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures, adjustedJif } = result
@@ -76,7 +77,7 @@ export default function ResultPanel({ result, input }) {
           aria-live="polite"
           className="mb-4 rounded-lg border border-amber-500/40 bg-amber-50/10 px-4 py-3 text-sm text-amber-100"
         >
-          LLM scoring unavailable right now — showing rule-only forecast. Q-rubric domain breakdowns are degraded; please retry shortly.
+          {t('result.degraded_banner')}
         </div>
       )}
 

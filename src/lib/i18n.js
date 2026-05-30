@@ -15,14 +15,23 @@
 // Fallback chain: ko -> en -> the raw key. Missing keys never throw;
 // they degrade to the english string, then to the key itself.
 //
+// Reactivity:
+//   - setLocale(locale) persists to localStorage and dispatches the
+//     'paperfate:locale-changed' CustomEvent on window so subscribers
+//     (e.g. useLocale) can re-render.
+//   - useLocale() is a React hook returning the current locale; it
+//     subscribes to the same event and re-renders consumers on change.
+//
 // This module is intentionally tiny — no third-party i18n runtime.
 
+import { useEffect, useState } from 'react'
 import koMessages from './messages-ko.json'
 import enMessages from './messages-en.json'
 
 const BUNDLES = { ko: koMessages, en: enMessages }
 const DEFAULT_LOCALE = 'ko'
 const STORAGE_KEY = 'paperfate.locale'
+const EVENT_NAME = 'paperfate:locale-changed'
 
 let cachedLocale = null
 
@@ -49,10 +58,45 @@ function detectLocale() {
   return DEFAULT_LOCALE
 }
 
-function getLocale() {
+export function getLocale() {
   if (cachedLocale) return cachedLocale
   cachedLocale = detectLocale()
   return cachedLocale
+}
+
+export function setLocale(locale) {
+  if (locale !== 'ko' && locale !== 'en') return
+  cachedLocale = locale
+
+  // Persist (best-effort).
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, locale)
+    }
+  } catch { /* private mode etc. — ignore */ }
+
+  // Notify subscribers.
+  try {
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { locale } }))
+    }
+  } catch { /* ignore */ }
+}
+
+export function useLocale() {
+  const [locale, setLocaleState] = useState(() => getLocale())
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (e) => {
+      const next = (e && e.detail && e.detail.locale) || getLocale()
+      setLocaleState(next)
+    }
+    window.addEventListener(EVENT_NAME, handler)
+    return () => window.removeEventListener(EVENT_NAME, handler)
+  }, [])
+
+  return locale
 }
 
 function lookup(bundle, path) {

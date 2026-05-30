@@ -1,4 +1,10 @@
 {
+  "nav": {
+    "lang_label": "언어",
+    "switch_to_ko": "한국어",
+    "switch_to_en": "English",
+    "primary_navigation": "주요 메뉴"
+  },
   "simulator": {
     "title": "PaperFate 시뮬레이터",
     "submit_button": "예측 실행",

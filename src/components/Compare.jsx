@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
+import { t } from '../lib/i18n.js'
 
 const ISSN_RE = /^\d{4}-\d{3}[\dxX]$/
 const PLACEHOLDER = 'NEJM, Lancet, JAMA, Annals of Internal Medicine'
@@ -133,7 +134,7 @@ export default function Compare() {
     <section id="compare" className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         <div className="lg:col-span-2">
-          <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">Compare venues</h2>
+          <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">{t('compare.title')}</h2>
           <p className="mt-3 text-slate-400">
             Drop 2–5 journals — by name or ISSN — and see JIF, quartile, OA status,
             APC, h-index, and scope side-by-side. Useful for shortlisting a target
@@ -204,7 +205,7 @@ export default function Compare() {
                 aria-label="Compare selected journals"
                 className="btn-primary shrink-0"
               >
-                {status === 'loading' ? 'Comparing…' : 'Compare'}
+                {status === 'loading' ? 'Comparing…' : t('compare.submit_button')}
               </button>
             </div>
 

@@ -2,9 +2,60 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures, abstractQuality, DOMAIN_COLORS, DOMAIN_NAMES } from '../lib/forecastClient.js'
 import { extractAll, extractAuthors, extractDois } from '../lib/extractMeta.js'
 import { trackEvent } from '../lib/telemetry.js'
+import { t } from '../lib/i18n.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
 import FileUpload from './FileUpload.jsx'
+
+// Draft persistence: rehydrate half-typed manuscript across reloads.
+// Stored under 'paperfate.simulator.draft' as { ts, title, abstract, authors,
+// references, target, mode }. Drafts older than 5 minutes are ignored on load.
+const DRAFT_KEY = 'paperfate.simulator.draft'
+const DRAFT_MAX_AGE_MS = 5 * 60 * 1000
+const DRAFT_FIELD_MAX_LEN = 100 * 1024 // 100KB per field guard
+const DRAFT_DEBOUNCE_MS = 1500
+const DRAFT_NOTE_HIDE_MS = 8000
+
+function readDraft() {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage?.getItem(DRAFT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    if (!Number.isFinite(+parsed.ts)) return null
+    if (Date.now() - (+parsed.ts) > DRAFT_MAX_AGE_MS) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeDraft(payload) {
+  if (typeof window === 'undefined') return
+  // Storage size guard — skip silently if any field is oversized.
+  for (const k of ['title', 'abstract', 'authors', 'references', 'target']) {
+    const v = payload?.[k]
+    if (typeof v === 'string' && v.length > DRAFT_FIELD_MAX_LEN) return
+  }
+  try {
+    window.localStorage?.setItem(DRAFT_KEY, JSON.stringify(payload))
+  } catch { /* quota / private mode — ignore */ }
+}
+
+function clearDraft() {
+  if (typeof window === 'undefined') return
+  try { window.localStorage?.removeItem(DRAFT_KEY) } catch { /* ignore */ }
+}
+
+function formatRelativeTime(tsMs) {
+  const diffSec = Math.max(0, Math.round((Date.now() - tsMs) / 1000))
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.round(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  return `${diffHr}h ago`
+}
 
 function roundTo(v, digits = 1) {
   if (!Number.isFinite(+v)) return null
@@ -119,13 +170,90 @@ export default function Simulator() {
   const [quickResult, setQuickResult] = useState(null)
   const [quickError, setQuickError] = useState(null)
 
-  // Track sim_mount exactly once on first render (StrictMode-safe).
+  // Draft restoration note. Visible for 8s after a successful rehydration so
+  // users notice their fields were repopulated from localStorage.
+  const [draftRestoredAt, setDraftRestoredAt] = useState(null)
+  const [draftNoteVisible, setDraftNoteVisible] = useState(false)
+
+  // Track sim_mount exactly once on first render (StrictMode-safe). Also
+  // rehydrate any localStorage draft (≤5min old) before debounced writes
+  // start firing — otherwise the empty initial state would overwrite the
+  // saved draft on its first onChange.
   const mountedRef = useRef(false)
+  const draftHydratedRef = useRef(false)
   useEffect(() => {
     if (mountedRef.current) return
     mountedRef.current = true
     trackEvent('sim_mount', {})
+
+    const draft = readDraft()
+    if (draft) {
+      if (typeof draft.title === 'string') setTitle(draft.title)
+      if (typeof draft.abstract === 'string') setText(draft.abstract)
+      if (typeof draft.authors === 'string') setAuthorsInput(draft.authors)
+      if (typeof draft.references === 'string') setReferencesInput(draft.references)
+      if (typeof draft.target === 'string' && draft.target) {
+        setOverrides(o => ({ ...o, target: draft.target }))
+      }
+      if (draft.mode === 'abstract' || draft.mode === 'full') {
+        setInputMode(draft.mode)
+      }
+      setDraftRestoredAt(+draft.ts)
+      setDraftNoteVisible(true)
+    }
+    draftHydratedRef.current = true
   }, [])
+
+  // Auto-hide the 'draft restored' note 8s after it appears.
+  useEffect(() => {
+    if (!draftNoteVisible) return
+    const id = setTimeout(() => setDraftNoteVisible(false), DRAFT_NOTE_HIDE_MS)
+    return () => clearTimeout(id)
+  }, [draftNoteVisible])
+
+  // Debounced draft save on any input change. We only persist after the
+  // initial hydration pass to avoid clobbering a freshly-loaded draft with
+  // the empty initial state.
+  useEffect(() => {
+    if (!draftHydratedRef.current) return
+    if (typeof window === 'undefined') return
+    // Skip saves while a forecast is running or done — those flows wipe the
+    // draft on success, so debouncing a fresh write would resurrect it.
+    if (status === 'running' || status === 'done') return
+    const titleEmpty = !title || !title.trim()
+    const textEmpty = !text || !text.trim()
+    const authorsEmpty = !authorsInput || !authorsInput.trim()
+    const refsEmpty = !referencesInput || !referencesInput.trim()
+    if (titleEmpty && textEmpty && authorsEmpty && refsEmpty) return
+    const id = setTimeout(() => {
+      writeDraft({
+        ts: Date.now(),
+        title,
+        abstract: text,
+        authors: authorsInput,
+        references: referencesInput,
+        target: overrides.target || '',
+        mode: inputMode,
+      })
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(id)
+  }, [title, text, authorsInput, referencesInput, overrides.target, inputMode, status])
+
+  function onClearDraft() {
+    clearDraft()
+    setTitle('')
+    setText('')
+    setAuthorsInput('')
+    setReferencesInput('')
+    setTargetJournalInput('')
+    setOverrides({})
+    setAuthorsAutoDetected(false)
+    setReferencesAutoDetected(false)
+    setDraftRestoredAt(null)
+    setDraftNoteVisible(false)
+    setStatus('idle')
+    setResult(null)
+  }
 
   // Ref to the form so Ctrl/Cmd+Enter from any text input can request a
   // native submit (preserves built-in validation + our onSubmit handler).
@@ -427,6 +555,10 @@ export default function Simulator() {
           .catch(err => console.warn('author-aware refine failed:', err.message))
       }
       setStatus('done')
+      // Forecast landed — drop the saved draft so a refresh starts clean.
+      clearDraft()
+      setDraftRestoredAt(null)
+      setDraftNoteVisible(false)
       const llmHealth = rNoAuthor?.llm_health || null
       const extractorUsed = rNoAuthor?.extractor_used || (rNoAuthor?.mode === 'mock' ? 'mock' : 'llm')
       const degraded =
@@ -454,7 +586,7 @@ export default function Simulator() {
     <section id="simulator" className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         <div className="lg:col-span-2">
-          <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">The simulator</h2>
+          <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">{t('simulator.title')}</h2>
           <p className="mt-3 text-slate-400">
             Paste your title and abstract — or the full manuscript. PaperFate reads the text,
             auto-detects what it can (study type, sample size, field, endpoints), and returns
@@ -483,11 +615,20 @@ export default function Simulator() {
             </div>
           </div>
           <button onClick={() => loadSample()} type="button" className="mt-3 text-xs text-fate-300 underline-offset-4 hover:underline hidden">
-            ↳ Try a sample manuscript
+            ↳ {t('simulator.sample_load')}
           </button>
         </div>
 
         <form ref={formRef} onSubmit={onSubmit} className="card p-5 sm:p-6 lg:col-span-3" aria-label="Manuscript forecast form">
+          {draftNoteVisible && draftRestoredAt && (
+            <div
+              className="mb-3 text-xs text-slate-400"
+              role="status"
+              aria-live="polite"
+            >
+              Draft restored from {formatRelativeTime(draftRestoredAt)}
+            </div>
+          )}
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <Tabs
@@ -559,7 +700,7 @@ export default function Simulator() {
                   value={text} onChange={e => setText(e.target.value)}
                   onKeyDown={onTextKeyDown}
                   rows={9}
-                  placeholder={PLACEHOLDER}
+                  placeholder={t('simulator.input_placeholder') || PLACEHOLDER}
                   aria-label="Abstract text"
                   className="input resize-y leading-relaxed"
                 />
@@ -651,6 +792,17 @@ export default function Simulator() {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {(title || text || authorsInput || referencesInput) && status !== 'running' && (
+                  <button
+                    type="button"
+                    onClick={onClearDraft}
+                    aria-label="Clear form and saved draft"
+                    title="Clear all fields and remove the saved draft"
+                    className="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
                 {inputMode === 'abstract' && (
                   <button
                     type="button"
@@ -661,7 +813,7 @@ export default function Simulator() {
                     title="Lightweight rubric check on title + abstract only. Doesn't replace the full forecast."
                     className="text-xs text-slate-300 hover:text-slate-100 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    {quickStatus === 'running' ? <>Checking<Dots /></> : 'Quick rubric check'}
+                    {quickStatus === 'running' ? <>Checking<Dots /></> : t('simulator.quick_check_button')}
                   </button>
                 )}
                 <button
@@ -670,7 +822,7 @@ export default function Simulator() {
                   aria-label="Run full PaperFate forecast"
                   className="btn-primary shrink-0"
                 >
-                  {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
+                  {status === 'running' ? <>{t('simulator.loading')}<Dots /></> : t('simulator.submit_button')}
                 </button>
               </div>
             </div>

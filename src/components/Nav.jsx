@@ -1,9 +1,16 @@
 import { trackEvent } from '../lib/telemetry.js'
 import { FATECORE_VERSION } from '../lib/version.js'
+import { t, setLocale, useLocale } from '../lib/i18n.js'
 
 export default function Nav() {
+  const locale = useLocale()
   const onNavClick = (target) => {
     trackEvent('nav_click', { target })
+  }
+  const onLocaleChange = (next) => {
+    if (next === locale) return
+    setLocale(next)
+    trackEvent('locale_change', { locale: next })
   }
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-ink-950/70 backdrop-blur" role="banner">
@@ -18,15 +25,8 @@ export default function Nav() {
           <span className="text-sm font-semibold tracking-tight">
             PaperFate
           </span>
-          <span
-            className="chip ml-1 text-slate-200"
-            role="note"
-            aria-label={`FateCore model version ${FATECORE_VERSION}`}
-          >
-            FateCore {FATECORE_VERSION}
-          </span>
         </a>
-        <nav className="hidden items-center gap-1 sm:flex" aria-label="Primary">
+        <nav className="hidden items-center gap-1 sm:flex" aria-label={t('nav.primary_navigation')}>
           <a
             href="#simulator"
             className="rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
@@ -47,9 +47,50 @@ export default function Nav() {
             className="btn-primary ml-2 px-4 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
             onClick={() => onNavClick('cta_try_demo')}
           >Try the demo</a>
+          <LocaleSwitcher locale={locale} onChange={onLocaleChange} />
+          <span
+            className="chip ml-2 text-slate-200"
+            role="note"
+            aria-label={`FateCore model version ${FATECORE_VERSION}`}
+          >
+            FateCore {FATECORE_VERSION}
+          </span>
         </nav>
       </div>
     </header>
+  )
+}
+
+function LocaleSwitcher({ locale, onChange }) {
+  const baseBtn =
+    'rounded-md px-2 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60'
+  const activeCls = 'bg-white/10 text-white'
+  const inactiveCls = 'text-slate-300 hover:bg-white/5 hover:text-white'
+  return (
+    <div
+      role="group"
+      aria-label={t('nav.lang_label')}
+      className="ml-2 flex items-center gap-0.5 rounded-lg border border-white/5 bg-white/[0.02] p-0.5"
+    >
+      <button
+        type="button"
+        onClick={() => onChange('ko')}
+        aria-label={t('nav.switch_to_ko')}
+        aria-pressed={locale === 'ko'}
+        className={`${baseBtn} ${locale === 'ko' ? activeCls : inactiveCls}`}
+      >
+        KO
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('en')}
+        aria-label={t('nav.switch_to_en')}
+        aria-pressed={locale === 'en'}
+        className={`${baseBtn} ${locale === 'en' ? activeCls : inactiveCls}`}
+      >
+        EN
+      </button>
+    </div>
   )
 }
 
