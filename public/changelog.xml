@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>PaperFate Changelog</title>
+    <link>https://paperfate.com</link>
+    <description>Round-by-round release notes for PaperFate.</description>
+    <language>en</language>
+    <lastBuildDate>Thu, 28 May 2026 10:00:00 +0000</lastBuildDate>
+    <atom:link href="https://paperfate.com/changelog.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Changelog feed initialized</title>
+      <link>https://github.com/yhstella/paperfate/blob/main/CHANGELOG.md</link>
+      <guid isPermaLink="false">paperfate-changelog-stub</guid>
+      <pubDate>Thu, 28 May 2026 10:00:00 +0000</pubDate>
+      <description><![CDATA[<ul><li>Placeholder item. Run <code>node scripts/build-changelog-feed.mjs</code> to populate from CHANGELOG.md.</li></ul>]]></description>
+    </item>
+  </channel>
+</rss>
