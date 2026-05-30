@@ -21,9 +21,25 @@
 //      .getRegistration() info: scope, the active/installing/waiting
 //      states + scriptURL, and (when present) the SW's reported version.
 //
+// Round 15 additions (Worker V):
+//   5. Recent telemetry summary — placeholder panel that explains the
+//      production sink is server-side (console + file) and points the
+//      operator at the local analyzer script. Production builds have no
+//      queryable endpoint so we deliberately don't fetch anything.
+//   6. Smoke history — reads the rolling array we persist under
+//      localStorage 'paperfate.admin.smoke_history' and renders the most
+//      recent N entries. 'Run smoke now' button runs the same probes as
+//      the Round 14 health-check (no network POST anywhere new) and
+//      appends a compact summary row to the history.
+//   7. Cache stats — uses the Cache Storage API (caches.keys() →
+//      cache.keys()) to surface every named cache + entry count. Useful
+//      for confirming the SW pre-cache landed.
+//
 // Telemetry:
-//   - trackEvent('admin_view')          on mount
-//   - trackEvent('admin_health_run')    on every health-check click
+//   - trackEvent('admin_view')                  on mount
+//   - trackEvent('admin_stats_view')            on mount (Round 15)
+//   - trackEvent('admin_health_run')            on every health-check click
+//   - trackEvent('admin_smoke_history_view')    on mount (Round 15)
 //
 // Accessibility: top-level <section role="region" aria-label="Admin
 // diagnostics"> so screen readers announce the tab as a single landmark.
@@ -189,6 +205,86 @@ async function describeServiceWorker() {
   }
 }
 
+// ── Round 15 helpers ─────────────────────────────────────────────────
+// All net-new functions live here so the original Round 14 code above
+// stays byte-identical (helps `git blame` and future audits).
+
+// localStorage key for the rolling smoke-result cache.
+const SMOKE_HISTORY_KEY = 'paperfate.admin.smoke_history'
+// How many entries we keep / show. The list is FIFO-trimmed on write.
+const SMOKE_HISTORY_MAX = 20
+
+// Defensive localStorage read — returns [] for any error (private mode,
+// quota, JSON corruption, missing API in SSR previews, …).
+function loadSmokeHistory() {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const raw = localStorage.getItem(SMOKE_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+  } catch {
+    return []
+  }
+}
+
+// Append one entry, trim to SMOKE_HISTORY_MAX, persist. Swallows quota
+// errors silently — smoke history is best-effort diagnostic data.
+function appendSmokeHistory(entry) {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const prev = loadSmokeHistory()
+    const next = [...prev, entry].slice(-SMOKE_HISTORY_MAX)
+    localStorage.setItem(SMOKE_HISTORY_KEY, JSON.stringify(next))
+    return next
+  } catch {
+    return loadSmokeHistory()
+  }
+}
+
+// Walk the Cache Storage API and return [{ name, entries }]. Empty
+// array when caches aren't available (SSR, http://, older browsers,
+// or when the user blocks storage).
+async function describeCaches() {
+  try {
+    if (typeof caches === 'undefined' || !caches || typeof caches.keys !== 'function') {
+      return { supported: false, items: [] }
+    }
+    const names = await caches.keys()
+    const items = []
+    for (const name of names) {
+      let entries = null
+      try {
+        const c = await caches.open(name)
+        const keys = await c.keys()
+        entries = Array.isArray(keys) ? keys.length : null
+      } catch {
+        entries = null
+      }
+      items.push({ name, entries })
+    }
+    return { supported: true, items }
+  } catch (e) {
+    return { supported: true, items: [], error: String((e && e.message) || e) }
+  }
+}
+
+// Same probe set the Round 14 health-check runs — used by the smoke
+// button so the two views stay aligned (no second source of truth).
+async function runSmokeProbes() {
+  const out = {}
+  await Promise.all(HEALTH_ROWS.map(async (row) => {
+    let result
+    try { result = await row.run() }
+    catch (e) {
+      result = { httpStatus: 0, ok: false, degraded: false, raw: null, error: String((e && e.message) || e) }
+    }
+    out[row.key] = deriveState(result)
+  }))
+  return out
+}
+
 export default function Admin() {
   // Per-row health-check results, keyed by HEALTH_ROWS[i].key.
   const [healthResults, setHealthResults] = useState(() => {
@@ -210,6 +306,15 @@ export default function Admin() {
   // it lives in its own state slot and refreshes on mount + on click.
   const [swStatus, setSwStatus] = useState(null)
 
+  // ── Round 15 state ────────────────────────────────────────────────
+  // Smoke history is hydrated from localStorage on mount and kept in
+  // React state so the panel re-renders after every 'Run smoke now'.
+  const [smokeHistory, setSmokeHistory] = useState(() => loadSmokeHistory())
+  const [smokeRunning, setSmokeRunning] = useState(false)
+  // Cache Storage snapshot. null until the async probe finishes; shape
+  // matches describeCaches()'s return.
+  const [cacheStats, setCacheStats] = useState(null)
+
   // Guard against late setState after unmount (the health-check fan-out
   // and the SW version probe both await — without this guard a quick
   // tab switch leaks a React warning).
@@ -223,6 +328,47 @@ export default function Admin() {
       if (aliveRef.current) setSwStatus(sw)
     })
   }, [])
+
+  // Round 15: separate mount effect so the Round 14 effect above stays
+  // untouched. Fires the two new analytics events + kicks the cache
+  // probe. The smoke-history view event is fired here because the
+  // panel renders unconditionally on mount.
+  useEffect(() => {
+    trackEvent('admin_stats_view')
+    trackEvent('admin_smoke_history_view')
+    describeCaches().then((cs) => {
+      if (aliveRef.current) setCacheStats(cs)
+    })
+  }, [])
+
+  // Refresh the cache snapshot — used by the 'Refresh' button under the
+  // Cache stats panel.
+  const refreshCacheStats = useCallback(async () => {
+    const cs = await describeCaches()
+    if (aliveRef.current) setCacheStats(cs)
+  }, [])
+
+  // Run the same probes as the Round 14 health-check, then append a
+  // summary entry into localStorage. We intentionally don't POST
+  // anywhere new — the task spec is explicit that 'Run smoke now'
+  // re-uses the existing probes.
+  const runSmokeNow = useCallback(async () => {
+    if (!aliveRef.current || smokeRunning) return
+    setSmokeRunning(true)
+    let states = {}
+    try { states = await runSmokeProbes() }
+    catch { states = {} }
+    if (!aliveRef.current) return
+    const entry = {
+      at: Date.now(),
+      results: states,
+    }
+    const next = appendSmokeHistory(entry)
+    if (aliveRef.current) {
+      setSmokeHistory(next)
+      setSmokeRunning(false)
+    }
+  }, [smokeRunning])
 
   const runHealthCheck = useCallback(async () => {
     if (!aliveRef.current) return
@@ -447,6 +593,145 @@ export default function Admin() {
                 </div>
               )}
             </dl>
+          )}
+        </div>
+      </div>
+
+      {/* ── Round 15 panels ─────────────────────────────────────── */}
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {/* Recent telemetry summary — placeholder by design */}
+        <div
+          role="region"
+          aria-label="Recent telemetry summary"
+          className="rounded-xl border border-white/10 bg-ink-900 p-4"
+        >
+          <h3 className="mb-2 text-sm font-semibold text-slate-200">
+            Recent telemetry summary
+          </h3>
+          <p className="text-xs text-slate-400">
+            Telemetry summary unavailable in this environment. Run{' '}
+            <code className="rounded bg-black/40 px-1 py-0.5 text-[11px]">
+              scripts/analyze-telemetry.mjs
+            </code>{' '}
+            locally with the Vercel log export.
+          </p>
+          <p className="mt-2 text-[11px] text-slate-500">
+            The production sink is server-side (console + file) and has
+            no queryable endpoint, so this panel intentionally does not
+            fetch.
+          </p>
+        </div>
+
+        {/* Smoke history — local cache of past 'Run smoke now' results */}
+        <div
+          role="region"
+          aria-label="Smoke history"
+          className="rounded-xl border border-white/10 bg-ink-900 p-4"
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-200">Smoke history</h3>
+            <button
+              type="button"
+              onClick={runSmokeNow}
+              disabled={smokeRunning}
+              className="rounded-md bg-fate-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-fate-500 focus:outline-none focus:ring-2 focus:ring-fate-400 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Run smoke now"
+            >
+              {smokeRunning ? 'Running…' : 'Run smoke now'}
+            </button>
+          </div>
+          <p className="mb-2 text-[11px] text-slate-500">
+            Last {SMOKE_HISTORY_MAX} entries cached locally in{' '}
+            <code className="rounded bg-black/40 px-1 py-0.5 text-[11px]">
+              localStorage.paperfate.admin.smoke_history
+            </code>
+            .
+          </p>
+          {smokeHistory.length === 0 ? (
+            <p className="text-xs text-slate-400">No smoke runs recorded yet.</p>
+          ) : (
+            <ul className="divide-y divide-white/5">
+              {smokeHistory.slice().reverse().map((entry, i) => {
+                const at = entry && entry.at
+                const results = (entry && entry.results) || {}
+                return (
+                  <li
+                    key={`${at || 'na'}-${i}`}
+                    className="flex items-center justify-between gap-3 py-1.5 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-mono text-[11px] text-slate-300">
+                        {at ? new Date(at).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-1">
+                      {HEALTH_ROWS.map((row) => {
+                        const state = results[row.key] || 'pending'
+                        return (
+                          <span
+                            key={row.key}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] ${badgeClass(state)}`}
+                            title={`${row.label}: ${badgeLabel(state)}`}
+                          >
+                            {row.key.replace(/^\//, '')}:{badgeLabel(state)}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Cache stats — Cache Storage API */}
+        <div
+          role="region"
+          aria-label="Cache storage stats"
+          className="rounded-xl border border-white/10 bg-ink-900 p-4 md:col-span-2"
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-200">Cache stats</h3>
+            <button
+              type="button"
+              onClick={refreshCacheStats}
+              className="rounded-md border border-white/10 bg-ink-800 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-ink-700 focus:outline-none focus:ring-2 focus:ring-fate-400"
+              aria-label="Refresh cache stats"
+            >
+              Refresh
+            </button>
+          </div>
+          {!cacheStats && (
+            <p className="text-xs text-slate-400">Probing…</p>
+          )}
+          {cacheStats && !cacheStats.supported && (
+            <p className="text-xs text-slate-400">
+              Cache Storage API unavailable in this environment.
+            </p>
+          )}
+          {cacheStats && cacheStats.supported && cacheStats.items.length === 0 && (
+            <p className="text-xs text-slate-400">No caches present.</p>
+          )}
+          {cacheStats && cacheStats.supported && cacheStats.items.length > 0 && (
+            <ul className="divide-y divide-white/5">
+              {cacheStats.items.map((c) => (
+                <li
+                  key={c.name}
+                  className="flex items-center justify-between gap-3 py-1.5 text-xs"
+                >
+                  <div className="min-w-0 flex-1 truncate font-mono text-slate-200" title={c.name}>
+                    {c.name}
+                  </div>
+                  <div className="shrink-0 font-mono text-slate-400">
+                    {c.entries == null ? '—' : `${c.entries} entr${c.entries === 1 ? 'y' : 'ies'}`}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {cacheStats && cacheStats.error && (
+            <p className="mt-2 font-mono text-[11px] text-rose-300">{cacheStats.error}</p>
           )}
         </div>
       </div>
