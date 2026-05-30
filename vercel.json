@@ -1,23 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/forecast.js": {
-      "maxDuration": 300
-    },
-    "api/similar.js": {
-      "maxDuration": 30
-    },
-    "api/journals-search.js": {
-      "maxDuration": 10
-    },
-    "api/journal-info.js": {
-      "maxDuration": 10
-    },
-    "api/references.js": {
-      "maxDuration": 60
-    },
-    "api/author-features.js": {
-      "maxDuration": 30
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://www.paperfate.com/api/$1",
+      "has": [{ "type": "host", "value": "paperfate.com" }]
     }
-  }
+  ]
 }
