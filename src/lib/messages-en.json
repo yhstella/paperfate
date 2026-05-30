@@ -20,12 +20,30 @@
     "quick_check_button": "Quick rubric check",
     "loading": "Forecasting...",
     "sample_load": "Try a sample manuscript",
-    "input_placeholder": "Paste your abstract here. PaperFate will auto-detect study type, sample size, field, and endpoints."
+    "input_placeholder": "Paste your abstract here. PaperFate will auto-detect study type, sample size, field, and endpoints.",
+    "clear_button": "Clear input",
+    "history_button": "View history",
+    "abstract_label": "Abstract",
+    "target_label": "Target journal",
+    "authors_label": "Authors",
+    "references_label": "References",
+    "autodetect_active": "Auto-detect active",
+    "sample_section_title": "Quick look with a sample",
+    "mode_hint": "Paste the abstract and PaperFate will fill in the rest."
   },
   "result": {
     "degraded_banner": "LLM scoring unavailable right now — showing rule-only forecast. Q-rubric domain breakdowns are degraded; please retry shortly.",
     "run_inputs": "Inputs used for this run",
-    "weakness_unavailable": "Rubric scoring unavailable for this run"
+    "weakness_unavailable": "Rubric scoring unavailable for this run",
+    "confidence_low": "Low confidence",
+    "confidence_med": "Moderate confidence",
+    "confidence_high": "High confidence",
+    "similar_papers_title": "Similar papers",
+    "target_journal_title": "Target journal fit",
+    "bibliography_title": "Bibliography check",
+    "journey_title": "Likely submission journey",
+    "weakness_title": "Areas to strengthen",
+    "suggestions_title": "Suggestions"
   },
   "compare": {
     "title": "Compare journals",
@@ -40,6 +58,12 @@
     "clear_button": "Clear input",
     "copy_to_clipboard": "Copy comparison",
     "refresh_button": "Refresh",
+    "sort_by_jif": "Sort by JIF",
+    "sort_by_name": "Sort by name",
+    "no_results": "No journals match these criteria.",
+    "more_results": "Show more",
+    "page_prev": "Previous",
+    "page_next": "Next",
     "columns": {
       "publisher": "Publisher",
       "jif": "JIF",
@@ -55,5 +79,45 @@
     "error": "Something went wrong. Please try again shortly.",
     "retry": "Retry",
     "close": "Close"
+  },
+  "history": {
+    "open": "Open history",
+    "close": "Close history",
+    "restore": "Restore this run",
+    "copy_link": "Copy link",
+    "copied": "Copied",
+    "clear_all": "Clear all history",
+    "clear_confirm": "Clear all saved forecasts? This cannot be undone.",
+    "no_entries": "No saved forecasts yet.",
+    "exported": "Exported as JSON",
+    "favorite_on": "Add to favorites",
+    "favorite_off": "Remove from favorites",
+    "add_tag": "Add tag",
+    "remove_tag": "Remove tag",
+    "tag_placeholder": "Type a tag and press Enter"
+  },
+  "status": {
+    "page_title": "Service status",
+    "refresh": "Refresh now",
+    "auto_refresh_on": "Auto-refresh on",
+    "auto_refresh_off": "Auto-refresh off",
+    "endpoint_ok": "Operational",
+    "endpoint_warn": "Degraded",
+    "endpoint_fail": "Down"
+  },
+  "pwa": {
+    "update_available": "A new version is ready.",
+    "reload": "Reload",
+    "dismiss": "Not now",
+    "offline_title": "You're offline",
+    "offline_message": "Reconnect to the network and try again.",
+    "retry": "Retry"
+  },
+  "errors": {
+    "network": "Check your network connection.",
+    "rate_limited": "Too many requests. Please try again shortly.",
+    "payload_too_large": "Input is too large. Please shorten it.",
+    "request_timeout": "The request timed out. Please try again.",
+    "unknown": "An unexpected error occurred."
   }
 }

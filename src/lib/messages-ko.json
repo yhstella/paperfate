@@ -20,12 +20,30 @@
     "quick_check_button": "Q-루브릭 빠르게 확인",
     "loading": "예측 중...",
     "sample_load": "샘플 원고로 시도하기",
-    "input_placeholder": "초록을 여기에 붙여넣으세요. PaperFate가 자동으로 연구 설계, 표본 크기, 분야, 엔드포인트를 추출합니다."
+    "input_placeholder": "초록을 여기에 붙여넣으세요. PaperFate가 자동으로 연구 설계, 표본 크기, 분야, 엔드포인트를 추출합니다.",
+    "clear_button": "입력 지우기",
+    "history_button": "기록 보기",
+    "abstract_label": "초록",
+    "target_label": "타겟 저널",
+    "authors_label": "저자",
+    "references_label": "참고문헌",
+    "autodetect_active": "자동 감지 사용 중",
+    "sample_section_title": "샘플로 빠르게 살펴보기",
+    "mode_hint": "초록을 그대로 붙여넣으면 PaperFate가 나머지를 채웁니다."
   },
   "result": {
     "degraded_banner": "LLM 채점이 현재 불가하여 룰 기반 예측만 표시합니다. Q-루브릭 도메인 점수는 제한되며, 잠시 후 다시 시도해 주세요.",
     "run_inputs": "이번 실행에 사용된 입력",
-    "weakness_unavailable": "이번 실행에서는 루브릭 채점이 제공되지 않습니다"
+    "weakness_unavailable": "이번 실행에서는 루브릭 채점이 제공되지 않습니다",
+    "confidence_low": "신뢰도 낮음",
+    "confidence_med": "신뢰도 보통",
+    "confidence_high": "신뢰도 높음",
+    "similar_papers_title": "비슷한 결의 논문",
+    "target_journal_title": "타겟 저널 적합도",
+    "bibliography_title": "참고문헌 점검",
+    "journey_title": "예상 투고 여정",
+    "weakness_title": "보완할 부분",
+    "suggestions_title": "개선 제안"
   },
   "compare": {
     "title": "저널 비교",
@@ -40,6 +58,12 @@
     "clear_button": "입력 지우기",
     "copy_to_clipboard": "비교 결과 복사",
     "refresh_button": "다시 불러오기",
+    "sort_by_jif": "JIF 순 정렬",
+    "sort_by_name": "이름 순 정렬",
+    "no_results": "해당 조건에 맞는 저널이 없습니다.",
+    "more_results": "더 보기",
+    "page_prev": "이전",
+    "page_next": "다음",
     "columns": {
       "publisher": "출판사",
       "jif": "JIF",
@@ -55,5 +79,45 @@
     "error": "문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
     "retry": "다시 시도",
     "close": "닫기"
+  },
+  "history": {
+    "open": "기록 열기",
+    "close": "기록 닫기",
+    "restore": "이 실행 불러오기",
+    "copy_link": "링크 복사",
+    "copied": "복사되었습니다",
+    "clear_all": "기록 전체 삭제",
+    "clear_confirm": "저장된 예측 기록을 모두 지울까요? 되돌릴 수 없습니다.",
+    "no_entries": "아직 저장된 예측이 없습니다.",
+    "exported": "JSON으로 내보냈습니다",
+    "favorite_on": "즐겨찾기에 추가",
+    "favorite_off": "즐겨찾기에서 제거",
+    "add_tag": "태그 추가",
+    "remove_tag": "태그 제거",
+    "tag_placeholder": "태그 입력 후 Enter"
+  },
+  "status": {
+    "page_title": "서비스 상태",
+    "refresh": "지금 새로고침",
+    "auto_refresh_on": "자동 새로고침 켜짐",
+    "auto_refresh_off": "자동 새로고침 꺼짐",
+    "endpoint_ok": "정상",
+    "endpoint_warn": "지연",
+    "endpoint_fail": "오류"
+  },
+  "pwa": {
+    "update_available": "새 버전이 준비되었습니다.",
+    "reload": "새로고침",
+    "dismiss": "나중에",
+    "offline_title": "오프라인 상태입니다",
+    "offline_message": "네트워크에 연결되면 다시 시도해 주세요.",
+    "retry": "다시 시도"
+  },
+  "errors": {
+    "network": "네트워크 연결을 확인해 주세요.",
+    "rate_limited": "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    "payload_too_large": "입력 본문이 너무 큽니다. 분량을 줄여 주세요.",
+    "request_timeout": "응답 시간이 초과되었습니다. 다시 시도해 주세요.",
+    "unknown": "알 수 없는 문제가 발생했습니다."
   }
 }
