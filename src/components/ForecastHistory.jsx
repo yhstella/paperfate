@@ -9,6 +9,7 @@ import {
   removeTag,
   exportAsJson,
 } from '../lib/forecastHistory.js'
+import { shareForecast, canShareForecast } from '../lib/shareForecast.js'
 
 const MAX_TAGS_PER_ENTRY = 5
 const TAG_MAX_LEN = 32
@@ -43,10 +44,13 @@ function formatJif(entry) {
 export default function ForecastHistory({ open, onClose, onRestore }) {
   const [entries, setEntries] = useState([])
   const [copiedId, setCopiedId] = useState(null)
+  const [sharedId, setSharedId] = useState(null)
+  const [sharedMethod, setSharedMethod] = useState(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [tagDraftId, setTagDraftId] = useState(null)
   const [tagDraft, setTagDraft] = useState('')
   const tagInputRef = useRef(null)
+  const shareAvailable = useMemo(() => canShareForecast(), [])
 
   function reload() {
     try {
@@ -64,6 +68,8 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
     try { trackEvent('history_open', { count: getForecasts().length }) } catch { /* ignore */ }
     setConfirmClear(false)
     setCopiedId(null)
+    setSharedId(null)
+    setSharedMethod(null)
     setTagDraftId(null)
     setTagDraft('')
   }, [open])
@@ -111,6 +117,23 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
     } catch {
       // Clipboard refused — best-effort, no fallback prompt to avoid UX noise.
     }
+  }
+
+  async function handleShare(entry) {
+    if (!entry) return
+    let result
+    try {
+      result = await shareForecast(entry)
+    } catch {
+      result = { ok: false, method: 'none' }
+    }
+    if (!result || !result.ok) return
+    setSharedId(entry.id)
+    setSharedMethod(result.method)
+    setTimeout(() => {
+      setSharedId(prev => (prev === entry.id ? null : prev))
+      setSharedMethod(prev => (prev && prev === result.method ? null : prev))
+    }, 1600)
   }
 
   function handleClear() {
@@ -364,14 +387,52 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                     </div>
 
                     <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(entry)}
-                        aria-label="Copy share link for this forecast"
-                        className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
-                      >
-                        {copiedId === entry.id ? 'Copied!' : 'Copy share link'}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(entry)}
+                          aria-label="Copy share link for this forecast"
+                          className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+                        >
+                          {copiedId === entry.id ? 'Copied!' : 'Copy share link'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleShare(entry)}
+                          disabled={!shareAvailable}
+                          aria-label="Share this forecast"
+                          title={shareAvailable ? 'Share forecast' : 'Sharing not supported in this browser'}
+                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md transition-colors ${
+                            shareAvailable
+                              ? 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                              : 'text-slate-600 cursor-not-allowed'
+                          }`}
+                        >
+                          <svg
+                            aria-hidden="true"
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <circle cx="18" cy="5" r="3" />
+                            <circle cx="6" cy="12" r="3" />
+                            <circle cx="18" cy="19" r="3" />
+                            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                          </svg>
+                          <span>
+                            {sharedId === entry.id
+                              ? (sharedMethod === 'clipboard' ? 'Copied!' : 'Shared!')
+                              : 'Share'}
+                          </span>
+                        </button>
+                      </div>
                       <button
                         type="button"
                         onClick={() => handleRestore(entry)}
