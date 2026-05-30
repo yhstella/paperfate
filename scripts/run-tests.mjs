@@ -22,6 +22,7 @@ const FILES = [
   join(__dirname, 'test-forecast-history.mjs'),
   join(__dirname, 'test-i18n.mjs'),
   join(__dirname, 'test-import-lint.mjs'),
+  join(__dirname, 'test-api-graceful.mjs'),
 ]
 
 let passed = 0
