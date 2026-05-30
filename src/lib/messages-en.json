@@ -1,0 +1,28 @@
+{
+  "simulator": {
+    "title": "PaperFate Simulator",
+    "submit_button": "Run forecast",
+    "quick_check_button": "Quick rubric check",
+    "loading": "Forecasting...",
+    "sample_load": "Try a sample manuscript",
+    "input_placeholder": "Paste your abstract here. PaperFate will auto-detect study type, sample size, field, and endpoints."
+  },
+  "result": {
+    "degraded_banner": "LLM scoring unavailable right now — showing rule-only forecast. Q-rubric domain breakdowns are degraded; please retry shortly.",
+    "run_inputs": "Inputs used for this run",
+    "weakness_unavailable": "Rubric scoring unavailable for this run"
+  },
+  "compare": {
+    "title": "Compare manuscripts",
+    "sample_load": "Load sample comparison",
+    "submit_button": "Compare both",
+    "side_a": "Manuscript A",
+    "side_b": "Manuscript B"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong. Please try again shortly.",
+    "retry": "Retry",
+    "close": "Close"
+  }
+}
