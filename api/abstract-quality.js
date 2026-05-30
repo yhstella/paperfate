@@ -65,8 +65,11 @@ function _pruneBuckets(now) {
 }
 
 /**
- * Take a token from the IP's bucket. Returns { ok: true } on success,
- * { ok: false, retryAfterSeconds } when rate-limited.
+ * Take a token from the IP's bucket. Returns
+ *   { ok: true,  remaining, resetSeconds }                        on success
+ *   { ok: false, remaining, resetSeconds, retryAfterSeconds }     when limited
+ * `remaining` is floor(tokens) AFTER the take (0 when limited).
+ * `resetSeconds` is the seconds until the bucket would be back to full.
  */
 function _takeToken(ip) {
   const now = Date.now()
@@ -84,11 +87,16 @@ function _takeToken(ip) {
   }
   if (b.tokens >= 1) {
     b.tokens -= 1
-    return { ok: true }
+    const remaining = Math.max(0, Math.floor(b.tokens))
+    const missing = RATE_LIMIT_PER_HOUR - b.tokens
+    const resetSeconds = Math.max(0, Math.ceil(missing / RATE_REFILL_PER_SEC))
+    return { ok: true, remaining, resetSeconds }
   }
   const deficit = 1 - b.tokens
   const retryAfterSeconds = Math.max(1, Math.ceil(deficit / RATE_REFILL_PER_SEC))
-  return { ok: false, retryAfterSeconds }
+  const missing = RATE_LIMIT_PER_HOUR - b.tokens
+  const resetSeconds = Math.max(0, Math.ceil(missing / RATE_REFILL_PER_SEC))
+  return { ok: false, remaining: 0, resetSeconds, retryAfterSeconds }
 }
 
 function _bypassRateLimit(req) {
@@ -109,6 +117,7 @@ function corsHeaders(origin) {
     'Access-Control-Allow-Origin':  allow,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Request-Id',
     'Vary': 'Origin',
   }
 }
@@ -145,17 +154,26 @@ export default async function handler(req, res) {
   const origin = req.headers.origin || ''
   for (const [k, v] of Object.entries(corsHeaders(origin))) res.setHeader(k, v)
 
+  // Generate request_id up front so every response (incl. 405/429) carries it
+  // in both the JSON body and the X-Request-Id header.
+  const request_id = newRequestId()
+  res.setHeader('X-Request-Id', request_id)
+
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed')
 
-  // Generate request_id up front so 429 responses can echo it.
-  const request_id = newRequestId()
-
   // Rate limit BEFORE readBody so abusive clients can't waste bandwidth.
   // Internal bypass header (when env token is set) skips the bucket entirely.
-  if (!_bypassRateLimit(req)) {
+  res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_PER_HOUR))
+  if (_bypassRateLimit(req)) {
+    res.setHeader('X-RateLimit-Bypass', 'true')
+    res.setHeader('X-RateLimit-Remaining', String(RATE_LIMIT_PER_HOUR))
+    res.setHeader('X-RateLimit-Reset', '0')
+  } else {
     const ip = _clientIp(req)
     const gate = _takeToken(ip)
+    res.setHeader('X-RateLimit-Remaining', String(gate.remaining))
+    res.setHeader('X-RateLimit-Reset', String(gate.resetSeconds))
     if (!gate.ok) {
       res.setHeader('Retry-After', String(gate.retryAfterSeconds))
       return res.status(429).json({
