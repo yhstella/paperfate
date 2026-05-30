@@ -28,12 +28,87 @@
 // Response:
 //   200 → result of forecastManuscript() — see src/server/extract.js
 //   4xx / 5xx → { error, detail, request_id }
+//
+// Rate limiting (best-effort, in-process token bucket):
+//   30 requests / IP / hour. Vercel serverless is stateless across cold
+//   starts so this protects against runaway loops on a single warm instance
+//   rather than global abuse. OPTIONS preflight is never limited, and a
+//   request carrying `x-paperfate-internal: $PAPERFATE_INTERNAL_TOKEN`
+//   (when the env var is set) bypasses the bucket entirely. On overflow:
+//   429 with { error: 'rate_limited', retry_after_seconds, request_id }
+//   and a Retry-After header. The bucket Map self-prunes every minute to
+//   bound memory.
 
 import { forecastManuscript } from '../src/server/extract.js'
 import { forecastManuscriptDeterministic } from '../src/server/deterministicExtract.js'
 import { predictFromExtraction } from '../src/server/fatecoreInference.js'
 import { generateSuggestions, generateJointCounterfactual } from '../src/server/suggestionEngine.js'
 import crypto from 'node:crypto'
+
+// ── Rate limiter (in-memory token bucket) ─────────────────────────────────
+// Best-effort: each warm Vercel instance owns its own Map. A cold start
+// resets the bucket, which is fine — we only need to stop loops/abuse from
+// a single client hammering one warm function.
+const RATE_LIMIT_PER_HOUR = 30
+const RATE_WINDOW_MS = 60 * 60 * 1000
+const RATE_REFILL_PER_SEC = RATE_LIMIT_PER_HOUR / 3600
+const _buckets = new Map() // ip → { tokens, lastRefillTs }
+let _lastPruneTs = 0
+const PRUNE_INTERVAL_MS = 60 * 1000
+
+function _clientIp(req) {
+  const xff = req.headers['x-forwarded-for']
+  if (xff && typeof xff === 'string') {
+    const first = xff.split(',')[0]?.trim()
+    if (first) return first.slice(0, 64)
+  }
+  const real = req.headers['x-real-ip']
+  if (real && typeof real === 'string') return real.trim().slice(0, 64)
+  return 'unknown'
+}
+
+function _pruneBuckets(now) {
+  if (now - _lastPruneTs < PRUNE_INTERVAL_MS) return
+  _lastPruneTs = now
+  const cutoff = now - RATE_WINDOW_MS
+  for (const [ip, b] of _buckets) {
+    if (b.lastRefillTs < cutoff) _buckets.delete(ip)
+  }
+}
+
+/**
+ * Take a token from the IP's bucket. Returns { ok: true } on success,
+ * { ok: false, retryAfterSeconds } when rate-limited.
+ */
+function _takeToken(ip) {
+  const now = Date.now()
+  _pruneBuckets(now)
+  let b = _buckets.get(ip)
+  if (!b) {
+    b = { tokens: RATE_LIMIT_PER_HOUR, lastRefillTs: now }
+    _buckets.set(ip, b)
+  } else {
+    const elapsedSec = (now - b.lastRefillTs) / 1000
+    if (elapsedSec > 0) {
+      b.tokens = Math.min(RATE_LIMIT_PER_HOUR, b.tokens + elapsedSec * RATE_REFILL_PER_SEC)
+      b.lastRefillTs = now
+    }
+  }
+  if (b.tokens >= 1) {
+    b.tokens -= 1
+    return { ok: true }
+  }
+  const deficit = 1 - b.tokens
+  const retryAfterSeconds = Math.max(1, Math.ceil(deficit / RATE_REFILL_PER_SEC))
+  return { ok: false, retryAfterSeconds }
+}
+
+function _bypassRateLimit(req) {
+  const expected = process.env.PAPERFATE_INTERNAL_TOKEN
+  if (!expected) return false
+  const got = req.headers['x-paperfate-internal']
+  return typeof got === 'string' && got === expected
+}
 
 // Allow ~5 minutes for full Q500 runs. Vercel Pro plan needed for >60s functions;
 // on hobby plan this is best-effort and may time out for large requests.
@@ -155,6 +230,21 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed', undefined, requestId)
+
+  // Rate limit BEFORE readBody so abusive clients can't waste bandwidth.
+  // Internal bypass header (when env token is set) skips the bucket entirely.
+  if (!_bypassRateLimit(req)) {
+    const ip = _clientIp(req)
+    const gate = _takeToken(ip)
+    if (!gate.ok) {
+      res.setHeader('Retry-After', String(gate.retryAfterSeconds))
+      return res.status(429).json({
+        error: 'rate_limited',
+        retry_after_seconds: gate.retryAfterSeconds,
+        request_id: requestId,
+      })
+    }
+  }
 
   let body
   try {
