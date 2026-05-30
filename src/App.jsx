@@ -9,6 +9,7 @@ import FAQ from './components/FAQ.jsx'
 import Footer from './components/Footer.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import SWUpdateToast from './components/SWUpdateToast.jsx'
+import PWAInstallPrompt from './components/PWAInstallPrompt.jsx'
 
 // Code-split: Compare is a heavier sibling of Simulator and most first
 // loads land on Simulator. Lazy-load it so initial JS stays lean.
@@ -96,6 +97,9 @@ export default function App() {
         {/* Persists across tab switches; renders nothing unless the SW
             signals a waiting/updated worker and the 24h snooze has elapsed. */}
         <SWUpdateToast />
+        {/* Floating amber pill that surfaces the deferred PWA install
+            prompt after 30s of engagement. Renders nothing until then. */}
+        <PWAInstallPrompt />
       </div>
     </ErrorBoundary>
   )
