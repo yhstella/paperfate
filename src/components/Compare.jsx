@@ -358,21 +358,230 @@ export default function Compare() {
           </div>
         )}
         {status === 'done' && data && data.length > 0 && (
-          <CompareTable journals={data} />
+          <CompareResults journals={data} />
         )}
       </div>
     </section>
   )
 }
 
-function CompareTable({ journals }) {
+// Sort comparators. JIF numeric (missing → -Infinity for desc / +Infinity for
+// asc so missing rows sink to the bottom in both directions). Name is locale-
+// aware case-insensitive A-Z.
+const SORT_OPTIONS = [
+  { value: 'jif_desc',  label: 'JIF (desc)',  by: 'jif',  direction: 'desc' },
+  { value: 'jif_asc',   label: 'JIF (asc)',   by: 'jif',  direction: 'asc' },
+  { value: 'name_asc',  label: 'Name (A–Z)',  by: 'name', direction: 'asc' },
+]
+const DEFAULT_SORT = 'jif_desc'
+const PAGE_SIZE = 4
+const COPIED_FLASH_MS = 1500
+
+function sortJournals(journals, sortValue) {
+  const opt = SORT_OPTIONS.find(o => o.value === sortValue) || SORT_OPTIONS[0]
+  const arr = journals.slice()
+  if (opt.by === 'jif') {
+    const sinkMissing = opt.direction === 'desc' ? -Infinity : Infinity
+    arr.sort((a, b) => {
+      const na = Number(a?.jif)
+      const nb = Number(b?.jif)
+      const va = Number.isFinite(na) ? na : sinkMissing
+      const vb = Number.isFinite(nb) ? nb : sinkMissing
+      return opt.direction === 'desc' ? vb - va : va - vb
+    })
+  } else {
+    arr.sort((a, b) => {
+      const sa = (a?.name || a?.issn || '').toString()
+      const sb = (b?.name || b?.issn || '').toString()
+      return sa.localeCompare(sb, undefined, { sensitivity: 'base' })
+    })
+  }
+  return arr
+}
+
+function escapeTSVCell(s) {
+  // TSV is tab/newline delimited. Replace tabs with spaces and collapse
+  // newlines so a single cell never breaks the grid when pasted into a
+  // spreadsheet.
+  return String(s ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ').trim()
+}
+
+function buildTSV(journals) {
+  // One row per metric, one column per journal — matches the on-screen layout
+  // so users can paste straight into Excel/Sheets/Numbers.
+  const header = ['Metric', ...journals.map((j, i) => j?.name || j?.issn || `Journal ${i + 1}`)]
+  const lines = [header.map(escapeTSVCell).join('\t')]
+  for (const row of ROWS) {
+    const label = row.labelKey ? t(row.labelKey) : row.label
+    const cells = [label]
+    for (const j of journals) {
+      const raw = j?.[row.key]
+      const value = row.fmt ? row.fmt(raw) : (raw == null || raw === '' ? '—' : String(raw))
+      cells.push(value)
+    }
+    lines.push(cells.map(escapeTSVCell).join('\t'))
+  }
+  return lines.join('\n')
+}
+
+function CompareResults({ journals }) {
+  const [sortValue, setSortValue] = useState(DEFAULT_SORT)
+  const [page, setPage] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef(null)
+
+  const sorted = useMemo(() => sortJournals(journals, sortValue), [journals, sortValue])
+
+  const showPagination = sorted.length > PAGE_SIZE
+  const pageCount = showPagination ? Math.ceil(sorted.length / PAGE_SIZE) : 1
+  // Clamp page if upstream data shrinks (e.g. new comparison submitted).
+  const safePage = Math.min(page, Math.max(0, pageCount - 1))
+  const pageStart = showPagination ? safePage * PAGE_SIZE : 0
+  const pageEnd = showPagination ? Math.min(pageStart + PAGE_SIZE, sorted.length) : sorted.length
+  const visible = showPagination ? sorted.slice(pageStart, pageEnd) : sorted
+
+  useEffect(() => {
+    // Reset to first page whenever the underlying data set or sort changes.
+    setPage(0)
+  }, [journals, sortValue])
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = null
+      }
+    }
+  }, [])
+
+  function onSortChange(e) {
+    const next = e.target.value
+    setSortValue(next)
+    const opt = SORT_OPTIONS.find(o => o.value === next) || SORT_OPTIONS[0]
+    trackEvent('compare_sort_change', { by: opt.by, direction: opt.direction })
+  }
+
+  function onPrev() {
+    if (safePage <= 0) return
+    const next = safePage - 1
+    setPage(next)
+    trackEvent('compare_paginate', { page: next })
+  }
+
+  function onNext() {
+    if (safePage >= pageCount - 1) return
+    const next = safePage + 1
+    setPage(next)
+    trackEvent('compare_paginate', { page: next })
+  }
+
+  async function onCopyTSV() {
+    // Copy the *fully sorted* dataset, not just the current page — users
+    // expect "copy table" to mean the whole comparison.
+    const tsv = buildTSV(sorted)
+    let ok = false
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(tsv)
+        ok = true
+      }
+    } catch {
+      ok = false
+    }
+    if (ok) {
+      setCopied(true)
+      trackEvent('compare_copy_tsv')
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copyTimerRef.current = null
+      }, COPIED_FLASH_MS)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <label htmlFor="compare-sort" className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Sort
+          </label>
+          <select
+            id="compare-sort"
+            value={sortValue}
+            onChange={onSortChange}
+            aria-label="Sort comparison table"
+            className="rounded-md border border-white/10 bg-white/[0.02] px-2.5 py-1.5 text-xs text-slate-200 hover:bg-white/[0.06] focus:outline-none focus:ring-1 focus:ring-fate-400/40 transition-colors"
+          >
+            {SORT_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onCopyTSV}
+            aria-label="Copy table as TSV"
+            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
+          >
+            Copy table as TSV
+          </button>
+          <span
+            role="status"
+            aria-live="polite"
+            className={`text-[11px] transition-opacity duration-150 ${copied ? 'opacity-100 text-emerald-300' : 'opacity-0 text-slate-500'}`}
+          >
+            {copied ? 'Copied!' : ' '}
+          </span>
+        </div>
+      </div>
+
+      <CompareTable journals={visible} totalCount={sorted.length} />
+
+      {showPagination && (
+        <nav
+          aria-label="Comparison pagination"
+          className="flex items-center justify-between gap-3 text-xs text-slate-400"
+        >
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={safePage === 0}
+            aria-label="Previous page"
+            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ← Prev
+          </button>
+          <span aria-live="polite">
+            Page {safePage + 1} of {pageCount} · journals {pageStart + 1}–{pageEnd} of {sorted.length}
+          </span>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={safePage >= pageCount - 1}
+            aria-label="Next page"
+            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next →
+          </button>
+        </nav>
+      )}
+    </div>
+  )
+}
+
+function CompareTable({ journals, totalCount }) {
+  const countLabel = (totalCount != null && totalCount !== journals.length)
+    ? `${journals.length} of ${totalCount} journals`
+    : `${journals.length} journals`
   return (
     <div className="card p-5 sm:p-6 animate-fade-up overflow-x-auto">
       <div className="mb-4 flex items-center justify-between">
         <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
           Side-by-side comparison
         </div>
-        <span className="chip">{journals.length} journals</span>
+        <span className="chip">{countLabel}</span>
       </div>
       <table
         className="min-w-full border-separate border-spacing-0 text-sm"
