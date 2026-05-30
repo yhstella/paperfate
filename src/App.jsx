@@ -12,6 +12,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 import SWUpdateToast from './components/SWUpdateToast.jsx'
 import PWAInstallPrompt from './components/PWAInstallPrompt.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
+import AboutChangelog from './components/AboutChangelog.jsx'
 import { registerShortcuts } from './lib/shortcuts.js'
 import { getLocale, setLocale } from './lib/i18n.js'
 
@@ -156,6 +157,18 @@ export default function App() {
           }
         },
       },
+      {
+        id: 'open-about',
+        label: 'About + What’s new',
+        run: () => {
+          // AboutChangelog mounts at the App root and subscribes to
+          // this event; it fetches CHANGELOG.md, renders it through
+          // our minimal markdown lib, and opens a modal.
+          if (typeof window !== 'undefined') {
+            try { window.dispatchEvent(new CustomEvent('paperfate:open-about')) } catch { /* ignore */ }
+          }
+        },
+      },
     ]
   }, [tab])
 
@@ -235,6 +248,10 @@ export default function App() {
         {/* Cmd/Ctrl+K command palette. Renders nothing until the
             shortcut fires the 'paperfate:open-command-palette' event. */}
         <CommandPalette actions={paletteActions} />
+        {/* About + What's new modal. Renders nothing until the
+            'paperfate:open-about' event is dispatched (from the
+            command palette action above). */}
+        <AboutChangelog />
       </div>
     </ErrorBoundary>
   )
