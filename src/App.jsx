@@ -15,6 +15,7 @@ import CommandPalette from './components/CommandPalette.jsx'
 import AboutChangelog from './components/AboutChangelog.jsx'
 import { registerShortcuts } from './lib/shortcuts.js'
 import { getLocale, setLocale } from './lib/i18n.js'
+import * as perfMonitor from './lib/perfMonitor.js'
 
 // Code-split: Compare is a heavier sibling of Simulator and most first
 // loads land on Simulator. Lazy-load it so initial JS stays lean.
@@ -60,6 +61,29 @@ export default function App() {
   useEffect(() => {
     const unregister = registerShortcuts()
     return unregister
+  }, [])
+
+  // Boot the long-task + LCP performance monitor after the first paint.
+  // We defer via requestAnimationFrame so the observer attaches just
+  // after the initial render commits — early enough that `buffered:
+  // true` still catches the LCP candidate, but late enough that we
+  // don't pile work into the first-paint critical path.
+  useEffect(() => {
+    let cancelled = false
+    let raf = 0
+    const start = () => { if (!cancelled) perfMonitor.init() }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      raf = window.requestAnimationFrame(start)
+    } else {
+      start()
+    }
+    return () => {
+      cancelled = true
+      if (raf && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        try { window.cancelAnimationFrame(raf) } catch { /* ignore */ }
+      }
+      perfMonitor.dispose()
+    }
   }, [])
 
   // Command palette actions. We rebuild on every tab change so the
