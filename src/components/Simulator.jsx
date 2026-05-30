@@ -6,6 +6,8 @@ import { t } from '../lib/i18n.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
 import FileUpload from './FileUpload.jsx'
+import ForecastHistory from './ForecastHistory.jsx'
+import { saveForecast, getForecast } from '../lib/forecastHistory.js'
 
 // Draft persistence: rehydrate half-typed manuscript across reloads.
 // Stored under 'paperfate.simulator.draft' as { ts, title, abstract, authors,
@@ -175,6 +177,10 @@ export default function Simulator() {
   const [draftRestoredAt, setDraftRestoredAt] = useState(null)
   const [draftNoteVisible, setDraftNoteVisible] = useState(false)
 
+  // Past-forecast history side panel. Opens via the small 'History' link in
+  // the action row; populated from localStorage via src/lib/forecastHistory.
+  const [historyOpen, setHistoryOpen] = useState(false)
+
   // Track sim_mount exactly once on first render (StrictMode-safe). Also
   // rehydrate any localStorage draft (≤5min old) before debounced writes
   // start firing — otherwise the empty initial state would overwrite the
@@ -186,20 +192,45 @@ export default function Simulator() {
     mountedRef.current = true
     trackEvent('sim_mount', {})
 
-    const draft = readDraft()
-    if (draft) {
-      if (typeof draft.title === 'string') setTitle(draft.title)
-      if (typeof draft.abstract === 'string') setText(draft.abstract)
-      if (typeof draft.authors === 'string') setAuthorsInput(draft.authors)
-      if (typeof draft.references === 'string') setReferencesInput(draft.references)
-      if (typeof draft.target === 'string' && draft.target) {
-        setOverrides(o => ({ ...o, target: draft.target }))
+    // URL ?forecast=<id> takes precedence over the half-typed draft — if
+    // the user came in via a share link we want the past run, not their
+    // last in-progress edit.
+    let restoredFromHistory = false
+    try {
+      if (typeof window !== 'undefined' && window.location?.search) {
+        const params = new URLSearchParams(window.location.search)
+        const fid = params.get('forecast')
+        if (fid) {
+          const entry = getForecast(fid)
+          if (entry) {
+            if (typeof entry.title === 'string') setTitle(entry.title)
+            if (typeof entry.abstract_preview === 'string') setText(entry.abstract_preview)
+            if (entry.mode === 'abstract' || entry.mode === 'full') {
+              setInputMode(entry.mode)
+            }
+            trackEvent('history_restore_url', { id: fid })
+            restoredFromHistory = true
+          }
+        }
       }
-      if (draft.mode === 'abstract' || draft.mode === 'full') {
-        setInputMode(draft.mode)
+    } catch { /* swallow — history restore is best-effort */ }
+
+    if (!restoredFromHistory) {
+      const draft = readDraft()
+      if (draft) {
+        if (typeof draft.title === 'string') setTitle(draft.title)
+        if (typeof draft.abstract === 'string') setText(draft.abstract)
+        if (typeof draft.authors === 'string') setAuthorsInput(draft.authors)
+        if (typeof draft.references === 'string') setReferencesInput(draft.references)
+        if (typeof draft.target === 'string' && draft.target) {
+          setOverrides(o => ({ ...o, target: draft.target }))
+        }
+        if (draft.mode === 'abstract' || draft.mode === 'full') {
+          setInputMode(draft.mode)
+        }
+        setDraftRestoredAt(+draft.ts)
+        setDraftNoteVisible(true)
       }
-      setDraftRestoredAt(+draft.ts)
-      setDraftNoteVisible(true)
     }
     draftHydratedRef.current = true
   }, [])
@@ -561,6 +592,20 @@ export default function Simulator() {
       setDraftNoteVisible(false)
       const llmHealth = rNoAuthor?.llm_health || null
       const extractorUsed = rNoAuthor?.extractor_used || (rNoAuthor?.mode === 'mock' ? 'mock' : 'llm')
+      // Persist a slim record of this successful run to local history so the
+      // user can revisit / share it. No manuscript text is stored — only
+      // title + first 100 chars of the abstract (see forecastHistory.js).
+      try {
+        saveForecast({
+          title,
+          abstract: text,
+          mode: input.mode,
+          predictions: rNoAuthor?.predictions || null,
+          extractor_used: extractorUsed,
+          request_id: rNoAuthor?.request_id || null,
+          wall_ms: Date.now() - submitStartedAt,
+        })
+      } catch { /* never break the flow */ }
       const degraded =
         ['mock', 'rule_fallback', 'deterministic'].includes(extractorUsed) ||
         (llmHealth && llmHealth.status === 'degraded')
@@ -792,6 +837,15 @@ export default function Simulator() {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(true)}
+                  aria-label="Open forecast history"
+                  title="View past forecasts saved on this device"
+                  className="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent transition-colors"
+                >
+                  History
+                </button>
                 {(title || text || authorsInput || referencesInput) && status !== 'running' && (
                   <button
                     type="button"
@@ -836,6 +890,22 @@ export default function Simulator() {
           </div>
         </form>
       </div>
+
+      <ForecastHistory
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onRestore={(entry) => {
+          if (!entry) return
+          if (typeof entry.title === 'string') setTitle(entry.title)
+          if (typeof entry.abstract_preview === 'string') setText(entry.abstract_preview)
+          if (entry.mode === 'abstract' || entry.mode === 'full') {
+            setInputMode(entry.mode)
+          }
+          setStatus('idle')
+          setResult(null)
+          setHistoryOpen(false)
+        }}
+      />
 
       <div id="result" className="mt-10 scroll-mt-24">
         {status === 'running' && <SkeletonResult />}
