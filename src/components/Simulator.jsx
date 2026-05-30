@@ -112,6 +112,18 @@ export default function Simulator() {
   const minChars = inputMode === 'full' ? 1000 : 200
   const canRun = title.trim().length > 8 && charCount >= minChars
 
+  // Scroll the result panel into view on both 'running' (skeleton) and 'done'
+  // (final cards) state transitions, so the user always sees status feedback
+  // even on small mobile viewports where the form fills the screen.
+  useEffect(() => {
+    if (status === 'running' || status === 'done') {
+      const t = setTimeout(() => {
+        document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 60)
+      return () => clearTimeout(t)
+    }
+  }, [status])
+
   // Elapsed-time counter that runs only while a forecast is in flight.
   useEffect(() => {
     if (status !== 'running') {
@@ -123,11 +135,12 @@ export default function Simulator() {
     const id = setInterval(() => {
       const sec = Math.round((Date.now() - startedAt) / 1000)
       setElapsedSec(sec)
-      const expectedMid = inputMode === 'full' ? 60 : 10
+      const expectedMid = inputMode === 'full' ? 90 : 25
       if (sec < expectedMid * 0.3) setProgressLabel('extracting features')
       else if (sec < expectedMid * 0.7) setProgressLabel('LLM Q-rubric scoring')
       else if (sec < expectedMid * 1.1) setProgressLabel('FateCore inference')
-      else setProgressLabel('finalising')
+      else if (sec < expectedMid * 1.5) setProgressLabel('finalising')
+      else setProgressLabel('still running… (high traffic)')
     }, 500)
     return () => clearInterval(id)
   }, [status, inputMode])
@@ -167,6 +180,11 @@ export default function Simulator() {
     setOverrides({})
     setStatus('idle')
     setResult(null)
+    setTargetJournalInput('')
+    setReferencesInput('')
+    setAuthorsInput('')
+    setReferencesAutoDetected(false)
+    setAuthorsAutoDetected(false)
   }
 
   async function onSubmit(e) {
@@ -175,7 +193,28 @@ export default function Simulator() {
     setStatus('running')
     setResult(null)
     const studyType = get('studyType', 'Other')
-    const articleType = STUDY_TYPE_TO_ARTICLE_TYPE[studyType] || '*'
+    let articleType = STUDY_TYPE_TO_ARTICLE_TYPE[studyType] || '*'
+    // If the user left study-type on Auto-detect (i.e. no override and no
+    // confident extractor hit), do a light client-side classification from the
+    // abstract text so the server gets a usable article_type instead of '*'.
+    const userStudyTypeRaw = overrides.studyType
+    const detectedStudyType = meta.studyType?.value
+    if (!userStudyTypeRaw || userStudyTypeRaw === 'Auto-detect') {
+      if (!detectedStudyType) {
+        const abs = text || ''
+        if (/\b(randomi[sz]ed|placebo-controlled|double-blind)\b/i.test(abs)) {
+          articleType = 'RCT'
+        } else if (/\bsystematic review|meta-analysis\b/i.test(abs)) {
+          articleType = 'systematic_review'
+        } else if (/\bretrospectively|chart review|electronic health record\b/i.test(abs)) {
+          articleType = 'cohort_retrospective'
+        } else if (/\bprospective cohort|longitudinal\b/i.test(abs)) {
+          articleType = 'cohort_prospective'
+        } else {
+          articleType = 'observational'
+        }
+      }
+    }
     const input = {
       title,
       abstract: text,
@@ -255,9 +294,6 @@ export default function Simulator() {
           .catch(err => console.warn('author-aware refine failed:', err.message))
       }
       setStatus('done')
-      setTimeout(() => {
-        document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 60)
     } catch (err) {
       console.error('forecast failed:', err)
       setStatus('idle')
@@ -318,13 +354,13 @@ export default function Simulator() {
                 )}
               </div>
             </div>
+            <div className="text-[11px] text-slate-500">
+              Abstract → fast scan · Full manuscript → deep rubric (slower, more accurate methods scoring)
+            </div>
 
             {inputMode === 'abstract' && (
               <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200/80">
-                Abstract-only mode: most Q500 rubric items require methods/results text, so the LLM
-                returns "indeterminate" for them. The forecast will lean heavily on objective
-                signals (sample size, design, follow-up) and external context (similar papers,
-                target journal, references). Upload the full manuscript for a methods-aware score.
+                Abstract-only run — upload the full manuscript for methods-aware scoring.
               </div>
             )}
 
@@ -389,7 +425,7 @@ export default function Simulator() {
               targetValue={overrides.target || 'Auto-recommend'}
             />
 
-            <div className="flex items-center justify-between pt-2 gap-3">
+            <div className="flex items-center justify-between pt-2 gap-3 sticky bottom-0 sm:static bg-ink-950/95 backdrop-blur p-3 -mx-5 sm:mx-0">
               <div className="text-xs text-slate-500 min-w-0">
                 {status === 'running' ? (
                   <div>
@@ -406,7 +442,7 @@ export default function Simulator() {
                     </div>
                   </div>
                 ) : (
-                  'Nothing is stored. All processing runs locally in your browser.'
+                  "Text is sent to PaperFate for LLM scoring. We don't persist it after the forecast completes."
                 )}
               </div>
               <button disabled={!canRun || status === 'running'} className="btn-primary shrink-0">
@@ -421,7 +457,7 @@ export default function Simulator() {
         {status === 'running' && <SkeletonResult />}
         {status === 'done' && result && (
           <div className="space-y-6">
-            <ResultPanel result={resultLegacyShape(result)} input={{ title, abstract: text }} />
+            <ResultPanel result={resultLegacyShape(result, { authorsInput, referencesInput })} input={{ title, abstract: text }} />
             {result.domain_rollup?.length > 0 && (
               <div className="card p-6 animate-fade-up">
                 <DomainRollup
@@ -467,6 +503,11 @@ function computeAdjustedJif(r, manuscriptText = '') {
   // not real manuscript-level reasoning. Only signals derived from real
   // user input (references, target journal, authors) or external retrieval
   // (similar papers) contribute to the blend below.
+  //
+  // Discount semantics: each component is pushed as the RAW jif (no per-
+  // component multiplier). The `w` weight is the sole discount mechanism in
+  // the weighted average. Previously the components were both pre-scaled and
+  // weighted, double-discounting external signals against the model baseline.
 
   // Similar-papers venue IF — strongest abstract-only signal. OpenAlex
   // retrieval often returns a mix of the original landmark paper and low-IF
@@ -479,27 +520,30 @@ function computeAdjustedJif(r, manuscriptText = '') {
   if (similars.length >= 2) {
     const topJifs = similars.slice(0, 3).map(s => s.if).sort((a, b) => b - a)
     const topMax = topJifs[0]
-    const topMed = topJifs.length === 1 ? topJifs[0] : (topJifs[0] + topJifs[topJifs.length - 1]) / 2
+    // Real median over sorted topJifs (handles len 1/2/3+ correctly). The
+    // previous build used (max+min)/2 which is the midpoint of the range,
+    // not the median — it ignored the middle value when len === 3.
+    const topMed = median(topJifs)
     // 60/40 mix of top-max and top-median — a single high-IF hit lifts the
     // signal but doesn't over-anchor if everything else is mid-tier.
     const simAnchor = 0.6 * topMax + 0.4 * topMed
-    components.push({ jif: simAnchor * 0.6, w: 0.6, label: 'similar papers' })
+    components.push({ jif: simAnchor, w: 0.6, label: 'similar papers' })
   }
 
   const refMedian = r?.references_summary?.median_jif
   if (Number.isFinite(refMedian) && refMedian > 0 && (r?.references_summary?.n_resolved || 0) >= 3) {
-    components.push({ jif: refMedian * 0.65, w: 0.45, label: 'bibliography' })
+    components.push({ jif: refMedian, w: 0.45, label: 'bibliography' })
   }
 
   const tjJif = r?.target_journal_info?.jif
   if (Number.isFinite(tjJif) && tjJif > 0) {
-    components.push({ jif: tjJif * 0.55, w: 0.3, label: 'target' })
+    components.push({ jif: tjJif, w: 0.3, label: 'target' })
   }
 
   const maxH = r?.author_features?.max_team_h_index
-  if (Number.isFinite(maxH) && maxH >= 40) {
-    const boosted = baseline * Math.min(10, Math.exp((maxH - 40) / 60))
-    components.push({ jif: boosted, w: 0.35, label: 'authors' })
+  if (Number.isFinite(maxH) && maxH >= 20) {
+    const boost = Math.min(8, Math.pow(maxH / 30, 0.7))
+    if (boost > 1.05) components.push({ jif: baseline * boost, w: 0.3, label: 'authors' })
   }
 
   const totalW = components.reduce((s, c) => s + c.w, 0)
@@ -514,23 +558,36 @@ function computeAdjustedJif(r, manuscriptText = '') {
 
 // Adapts the new server schema back to the shape ResultPanel was originally
 // designed for, so the existing 6-card layout still renders.
-function resultLegacyShape(r) {
+function resultLegacyShape(r, ctx = {}) {
   if (r?.legacy) return r.legacy   // already the mock shape
   const p = r.predictions || {}
+  const llmHealth = r.llm_health || null
+  const extractionFallbackReason = r.extraction_fallback_reason || r.mock_fallback_reason || null
+  const extractorUsed = r.extractor_used || (r.mode === 'mock' ? 'mock' : 'llm')
+  const degradedMode =
+    ['mock', 'rule_fallback', 'deterministic'].includes(extractorUsed) ||
+    llmHealth?.status === 'degraded'
+  const manuscriptJifPoint = Number.isFinite(+p.jcr_jif?.point) ? +p.jcr_jif.point : null
+
+  const baseWeakness = r.key_weaknesses?.[0]?.name || 'See domain rollup below.'
+  const baseSuggestions = (Array.isArray(r.counterfactual_suggestions) && r.counterfactual_suggestions.length > 0
+    ? r.counterfactual_suggestions.map(s =>
+        `${s.name} → +${s.predicted_jif_lift?.toFixed?.(1) ?? s.predicted_jif_lift} JIF`)
+    : (r.key_weaknesses || []).slice(0, 5).map(w => w.name)
+  )
+
   return {
     score: r.overall_score ?? null,
     tier: jifToTier(p.jcr_jif, r.journey),
     deskReject: deskRejectFormat(p.desk_reject_risk),
     timeline: timelineFromPrediction(p.review_timeline_days, p.jcr_jif),
     citation: citationsFormat(p.citations_5yr, r.overall_score),
-    weakness: r.key_weaknesses?.[0]?.name || 'See domain rollup below.',
-    suggestions: (Array.isArray(r.counterfactual_suggestions) && r.counterfactual_suggestions.length > 0
-      ? r.counterfactual_suggestions.map(s =>
-          `${s.name} → +${s.predicted_jif_lift?.toFixed?.(1) ?? s.predicted_jif_lift} JIF`)
-      : (r.key_weaknesses || []).slice(0, 5).map(w => w.name)
-    ),
+    weakness: degradedMode ? 'Rubric scoring unavailable for this run' : baseWeakness,
+    suggestions: degradedMode
+      ? ['Re-run with a full manuscript for actionable suggestions']
+      : baseSuggestions,
     jointCounterfactual: r.joint_counterfactual || null,
-    manuscriptJifPoint: Number.isFinite(+p.jcr_jif?.point) ? +p.jcr_jif.point : null,
+    manuscriptJifPoint,
     similars: (r.similar_papers || []).map(s => ({
       title: s.title || '—',
       venue: s.venue || '—',
@@ -551,6 +608,17 @@ function resultLegacyShape(r) {
         }
       : null,
     journey: r.journey || [],
+    llmHealth,
+    extractionFallbackReason,
+    extractorUsed,
+    degradedMode,
+    mode: r.mode || null,
+    authorsCount: typeof ctx.authorsInput === 'string'
+      ? ctx.authorsInput.split(/[,;\n]+/).filter(Boolean).length
+      : 0,
+    referencesCount: typeof ctx.referencesInput === 'string'
+      ? ctx.referencesInput.split(/[,;\n]+/).filter(Boolean).length
+      : 0,
   }
 }
 

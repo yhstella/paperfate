@@ -1,3 +1,5 @@
+import { FATECORE_VERSION } from '../lib/version.js'
+
 export default function Nav() {
   return (
     <header className="sticky top-0 z-30 border-b border-white/5 bg-ink-950/70 backdrop-blur">
@@ -7,7 +9,7 @@ export default function Nav() {
           <span className="text-sm font-semibold tracking-tight">
             PaperFate
           </span>
-          <span className="chip ml-1">FateCore v0.1</span>
+          <span className="chip ml-1">FateCore {FATECORE_VERSION}</span>
         </a>
         <nav className="hidden items-center gap-1 sm:flex">
           <a href="#simulator" className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5">Simulator</a>

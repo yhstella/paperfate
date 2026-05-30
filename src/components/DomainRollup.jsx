@@ -65,10 +65,10 @@ function DomainBar({ domain, maxScore }) {
               : 'text-rose-300'
 
   return (
-    <div className="grid grid-cols-[140px_1fr_auto] items-center gap-3">
+    <div className="grid grid-cols-[100px_1fr_auto] sm:grid-cols-[140px_1fr_auto] items-center gap-3">
       <div className="text-xs text-slate-300 truncate">
         {label}
-        <span className="ml-1 text-[10px] text-slate-500">({code})</span>
+        <span className="ml-1 text-[10px] text-slate-500 hidden sm:inline">({code})</span>
       </div>
       <div className="relative h-5 overflow-hidden rounded bg-white/[0.04]">
         {score != null && (
