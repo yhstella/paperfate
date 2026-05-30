@@ -304,6 +304,16 @@ export default async function handler(req, res) {
       authorFeatures: author_features || {},
     }
     const fatecore = predictFromExtraction(manuscript, extraction, inferenceOpts)
+
+    // Rule-fallback runs lose access to the LLM's rubric judgement (NOVEL/INTERP/
+    // framing items can't be regex-derived). Even at 100% deterministic coverage
+    // the resulting forecast is structurally weaker than a healthy LLM run, so
+    // cap the confidence the UI surfaces. This is independent of fatecoreInference's
+    // coverage-ratio cap (which expects an LLM-shaped extraction).
+    if (extraction?.extractor_used === 'rule_fallback' && fatecore && Number.isFinite(fatecore.confidence)) {
+      fatecore.confidence = Math.min(fatecore.confidence, 0.30)
+    }
+
     const suggestions = generateSuggestions(extraction, manuscript, fatecore, inferenceOpts)
     const jointCounterfactual = generateJointCounterfactual(extraction, manuscript, fatecore, suggestions, inferenceOpts)
     const wallMs = Date.now() - t0
