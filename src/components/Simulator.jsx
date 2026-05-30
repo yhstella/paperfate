@@ -65,6 +65,67 @@ function roundTo(v, digits = 1) {
   return Math.round((+v) * m) / m
 }
 
+// ---- Validation helpers (Round VI) --------------------------------------
+// Color band for abstract word counts. Mirrors what reviewers/editors expect:
+// most journals cap structured abstracts around 250-300 words. Green is the
+// sweet spot, amber is "off but usable", red is genuinely problematic.
+function abstractWordBand(n) {
+  if (!Number.isFinite(+n)) return { tone: 'slate', label: '' }
+  if (n >= 200 && n <= 350) return { tone: 'green', label: '' }
+  if ((n >= 150 && n < 200) || (n > 350 && n <= 500)) return { tone: 'amber', label: '' }
+  if (n < 150) return { tone: 'red', label: 'too short' }
+  return { tone: 'red', label: 'too long' }
+}
+
+// Title char band: most journals soft-cap around 200 chars (Nature 15 words,
+// Lancet 30, but char-based is easier to reason about live).
+function titleCharBand(n) {
+  if (!Number.isFinite(+n)) return { tone: 'slate', label: '' }
+  if (n === 0) return { tone: 'slate', label: '' }
+  if (n < 30) return { tone: 'amber', label: 'short' }
+  if (n <= 180) return { tone: 'green', label: '' }
+  if (n <= 200) return { tone: 'amber', label: 'long' }
+  return { tone: 'red', label: 'over 200' }
+}
+
+const VALIDATION_TONE_CLASS = {
+  green: 'text-emerald-400/90',
+  amber: 'text-amber-300/90',
+  red: 'text-rose-300/90',
+  slate: 'text-slate-400',
+}
+
+// DOI candidate split: same separators we use server-side (whitespace, comma,
+// semicolon, newline). Empty entries are dropped before classification.
+const DOI_RE = /^10\.\d{4,9}\/[^ ]+$/
+
+function splitDoiCandidates(s) {
+  if (!s || typeof s !== 'string') return []
+  return s.split(/[\s,;\r\n]+/).map(x => x.trim()).filter(Boolean)
+}
+
+function classifyDois(s) {
+  const cands = splitDoiCandidates(s)
+  let valid = 0
+  let invalid = 0
+  for (const c of cands) {
+    if (DOI_RE.test(c)) valid++
+    else invalid++
+  }
+  return { valid, invalid, total: cands.length }
+}
+
+// Authors list count — same per-line split the submit handler uses, minus the
+// length filter so an in-progress single-name line still increments the count.
+function countAuthors(s) {
+  if (!s || typeof s !== 'string') return 0
+  return s
+    .split(/[\r\n;]+/)
+    .map(x => x.replace(/^[\s,]+|[\s,]+$/g, '').trim())
+    .filter(Boolean)
+    .length
+}
+
 const FIELDS = [
   'Auto-detect',
   'Oncology', 'Cardiology', 'Neurology', 'Endocrinology',
@@ -180,6 +241,16 @@ export default function Simulator() {
   // Past-forecast history side panel. Opens via the small 'History' link in
   // the action row; populated from localStorage via src/lib/forecastHistory.
   const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Round VI: soft validation confirmation. When the inputs look wildly off
+  // (e.g. <100 word abstract, >600 word abstract), we surface a single inline
+  // 'proceed anyway?' bar instead of blocking submission. Holds the last
+  // computed reason so we can pass it through telemetry on confirm.
+  const [pendingConfirm, setPendingConfirm] = useState(null)
+  // Ref the Confirm button flips before requesting submit, so the next
+  // onSubmit pass bypasses the warning gate exactly once. Plain pendingConfirm
+  // state would race with React batching here.
+  const confirmedBypassRef = useRef(false)
 
   // Track sim_mount exactly once on first render (StrictMode-safe). Also
   // rehydrate any localStorage draft (≤5min old) before debounced writes
@@ -315,6 +386,19 @@ export default function Simulator() {
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
   const minChars = inputMode === 'full' ? 1000 : 200
   const canRun = title.trim().length > 8 && charCount >= minChars
+
+  // Round VI: live validation derivations. These are pure-from-state so they
+  // re-evaluate on every keystroke without extra effects. The abstract band
+  // is only meaningful in 'abstract' mode — for full manuscripts the textarea
+  // is gone and the count would mislead the reader.
+  const titleCharCount = title.length
+  const titleBand = useMemo(() => titleCharBand(titleCharCount), [titleCharCount])
+  const abstractBand = useMemo(
+    () => (inputMode === 'abstract' ? abstractWordBand(wordCount) : { tone: 'slate', label: '' }),
+    [wordCount, inputMode]
+  )
+  const doiStats = useMemo(() => classifyDois(referencesInput), [referencesInput])
+  const authorCount = useMemo(() => countAuthors(authorsInput), [authorsInput])
 
   // Scroll the result panel into view on both 'running' (skeleton) and 'done'
   // (final cards) state transitions, so the user always sees status feedback
@@ -461,9 +545,45 @@ export default function Simulator() {
     }
   }
 
+  // Round VI: compute the first "this looks off" reason for the current
+  // inputs, or null if everything looks reasonable. We only flag genuinely
+  // unusual cases here (the live banding above already nudges on the milder
+  // ones) so we don't bother the user with a confirm every other submit.
+  function computeSubmitWarning() {
+    if (inputMode === 'abstract') {
+      if (wordCount > 0 && wordCount < 100) {
+        return { field: 'abstract', reason: 'abstract_too_short', detail: `${wordCount} words` }
+      }
+      if (wordCount > 600) {
+        return { field: 'abstract', reason: 'abstract_too_long', detail: `${wordCount} words` }
+      }
+    }
+    if (titleCharCount > 0 && titleCharCount > 200) {
+      return { field: 'title', reason: 'title_too_long', detail: `${titleCharCount} chars` }
+    }
+    return null
+  }
+
   async function onSubmit(e) {
     e.preventDefault()
     if (!canRun) return
+    // Soft validation gate — show inline confirm before kicking off the
+    // forecast if inputs look unusual. The user can still proceed; we just
+    // make them blink first. The confirmedBypassRef is flipped by the
+    // 'Confirm' button so we skip the check on that one re-entry.
+    if (confirmedBypassRef.current) {
+      confirmedBypassRef.current = false
+      setPendingConfirm(null)
+    } else {
+      const warn = computeSubmitWarning()
+      if (warn) {
+        setPendingConfirm(warn)
+        trackEvent('sim_validation_warn', { field: warn.field, reason: warn.reason })
+        return
+      }
+      // No warning — make sure any stale confirm bar is gone.
+      if (pendingConfirm) setPendingConfirm(null)
+    }
     setStatus('running')
     setResult(null)
     const studyType = get('studyType', 'Other')
@@ -710,6 +830,12 @@ export default function Simulator() {
                 aria-label="Manuscript title"
                 className="input"
               />
+              <div
+                className={`mt-1 text-xs ${VALIDATION_TONE_CLASS[titleBand.tone] || 'text-slate-400'}`}
+                aria-live="polite"
+              >
+                {titleCharCount} / 200 chars{titleBand.label ? ` · ${titleBand.label}` : ''}
+              </div>
             </Field>
 
             <div
@@ -740,15 +866,23 @@ export default function Simulator() {
                   currentTextLength={charCount}
                 />
               ) : (
-                <textarea
-                  id="sim-abstract-textarea"
-                  value={text} onChange={e => setText(e.target.value)}
-                  onKeyDown={onTextKeyDown}
-                  rows={9}
-                  placeholder={t('simulator.input_placeholder') || PLACEHOLDER}
-                  aria-label="Abstract text"
-                  className="input resize-y leading-relaxed"
-                />
+                <>
+                  <textarea
+                    id="sim-abstract-textarea"
+                    value={text} onChange={e => setText(e.target.value)}
+                    onKeyDown={onTextKeyDown}
+                    rows={9}
+                    placeholder={t('simulator.input_placeholder') || PLACEHOLDER}
+                    aria-label="Abstract text"
+                    className="input resize-y leading-relaxed"
+                  />
+                  <div
+                    className={`mt-1 text-xs ${VALIDATION_TONE_CLASS[abstractBand.tone] || 'text-slate-400'}`}
+                    aria-live="polite"
+                  >
+                    {wordCount} word{wordCount === 1 ? '' : 's'}{abstractBand.label ? ` · ${abstractBand.label}` : ''}
+                  </div>
+                </>
               )}
             </Field>
             </div>
@@ -779,6 +913,9 @@ export default function Simulator() {
                 aria-label="Authors (optional, one per line)"
                 className="input resize-y"
               />
+              <div className="mt-1 text-xs text-slate-400" aria-live="polite">
+                {authorCount} author{authorCount === 1 ? '' : 's'}
+              </div>
             </Field>
 
             <Field
@@ -795,6 +932,14 @@ export default function Simulator() {
                 aria-label="Reference DOIs (optional, one per line)"
                 className="input resize-y"
               />
+              <div
+                className={`mt-1 text-xs ${doiStats.invalid > 0 ? 'text-amber-300/90' : 'text-slate-400'}`}
+                aria-live="polite"
+              >
+                {doiStats.total === 0
+                  ? '0 DOIs'
+                  : `${doiStats.valid} valid, ${doiStats.invalid} invalid`}
+              </div>
             </Field>
 
             <DetectedPanel
@@ -804,6 +949,41 @@ export default function Simulator() {
               targetValue={overrides.target || 'Auto-recommend'}
             />
 
+            {pendingConfirm && status !== 'running' && (
+              <div
+                className="rounded-md border border-amber-400/30 bg-amber-400/[0.06] p-3 text-xs text-amber-100/90 flex items-center justify-between gap-3 flex-wrap"
+                role="alertdialog"
+                aria-live="polite"
+                aria-label="Input validation warning"
+              >
+                <span>
+                  Inputs look unusual{pendingConfirm.detail ? ` (${pendingConfirm.detail})` : ''} — proceed anyway?
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPendingConfirm(null)}
+                    className="text-xs text-slate-300 hover:text-slate-100 px-2.5 py-1 rounded-md border border-white/10 hover:border-white/20 bg-transparent transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmedBypassRef.current = true
+                      if (formRef.current && typeof formRef.current.requestSubmit === 'function') {
+                        formRef.current.requestSubmit()
+                      } else if (formRef.current) {
+                        formRef.current.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+                      }
+                    }}
+                    className="text-xs text-amber-100 hover:text-white px-2.5 py-1 rounded-md border border-amber-300/40 hover:border-amber-300/70 bg-amber-400/10 transition-colors"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between pt-2 gap-3 sticky bottom-0 sm:static bg-ink-950/95 backdrop-blur p-3 -mx-5 sm:mx-0">
               <div
                 className="text-xs text-slate-500 min-w-0"
