@@ -6,56 +6,49 @@ const DB = join(process.env.DATA_ROOT || './data', 'paperfate.db')
 const db = new Database(DB, { readonly: true })
 db.pragma('busy_timeout=60000')
 
+const fmt = n => Number(n || 0).toLocaleString()
+
 console.log('=== paper_scores by mode ===')
 for (const r of db.prepare('SELECT mode, COUNT(*) AS n FROM paper_scores GROUP BY mode ORDER BY n DESC').all()) {
-  console.log(' ', r.mode.padEnd(20), r.n.toLocaleString())
+  console.log(' ', String(r.mode).padEnd(22), fmt(r.n))
 }
 
-const totalPapers = db.prepare('SELECT COUNT(*) AS n FROM papers').get().n
-console.log('\n=== papers total ===')
-console.log(' ', totalPapers.toLocaleString())
+console.log('\n=== distinct DOIs scored per mode ===')
+try {
+  for (const r of db.prepare('SELECT mode, COUNT(DISTINCT doi) AS d FROM paper_scores GROUP BY mode ORDER BY d DESC').all()) {
+    console.log(' ', String(r.mode).padEnd(22), fmt(r.d))
+  }
+} catch (e) { console.log('  (no doi column:', e.message, ')') }
 
-console.log('\n=== fulltext coverage (body_word_count >= 800) ===')
-for (const col of ['epmc_body_word_count', 'pmc_body_word_count', 'pdf_body_word_count']) {
+console.log('\n=== papers total ===', fmt(db.prepare('SELECT COUNT(*) AS n FROM papers').get().n))
+
+// discover actual column names for body word counts
+const cols = db.prepare('PRAGMA table_info(papers)').all().map(c => c.name)
+const bodyCols = cols.filter(c => /body.*word|word.*count|_body_/i.test(c))
+console.log('\n=== fulltext body columns present ===')
+console.log(' ', bodyCols.join(', ') || '(none matched)')
+for (const c of bodyCols) {
   try {
-    const n = db.prepare(`SELECT COUNT(*) AS n FROM papers WHERE ${col} >= 800`).get().n
-    console.log(' ', col.padEnd(28), n.toLocaleString())
-  } catch (e) {
-    console.log(' ', col.padEnd(28), '(column missing)')
-  }
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM papers WHERE ${c} >= 800`).get().n
+    console.log('  ', c.padEnd(28), '>=800 words:', fmt(n))
+  } catch {}
 }
 
-console.log('\n=== top-JIF papers eligible for Q500-fulltext rescoring ===')
-try {
-  const r = db.prepare(`
-    SELECT
-      COUNT(*) FILTER (WHERE real_jcr_jif >= 30) AS top,
-      COUNT(*) FILTER (WHERE real_jcr_jif >= 10 AND real_jcr_jif < 30) AS high,
-      COUNT(*) FILTER (WHERE real_jcr_jif >=  3 AND real_jcr_jif < 10) AS mid,
-      COUNT(*) FILTER (WHERE real_jcr_jif <  3) AS low
-    FROM papers
-    WHERE (epmc_body_word_count >= 800 OR pmc_body_word_count >= 800)
-  `).get()
-  console.log('  IF >= 30 (NEJM-class):', (r.top || 0).toLocaleString())
-  console.log('  IF 10-30            :', (r.high || 0).toLocaleString())
-  console.log('  IF  3-10            :', (r.mid || 0).toLocaleString())
-  console.log('  IF <  3             :', (r.low || 0).toLocaleString())
-} catch (e) {
-  console.log('  (real_jcr_jif column missing:', e.message, ')')
+// any-fulltext coverage
+const anyCov = bodyCols.length
+  ? `(${bodyCols.map(c => `COALESCE(${c},0) >= 800`).join(' OR ')})`
+  : null
+if (anyCov) {
+  const n = db.prepare(`SELECT COUNT(*) AS n FROM papers WHERE ${anyCov}`).get().n
+  console.log('\n=== papers with ANY fulltext (>=800 words) ===', fmt(n))
 }
 
-console.log('\n=== latest paper_scores rows (any mode) ===')
+// recent scoring activity
+console.log('\n=== recent paper_scores rows ===')
+const tsCol = cols.includes('scored_at') ? 'scored_at' : (db.prepare('PRAGMA table_info(paper_scores)').all().map(c=>c.name).find(c => /at$|time|ts/i.test(c)))
 try {
-  for (const r of db.prepare(`
-    SELECT doi, mode, q_score_mean, scored_at
-    FROM paper_scores
-    ORDER BY scored_at DESC
-    LIMIT 5
-  `).all()) {
-    console.log(' ', r.scored_at, r.mode.padEnd(18), 'q=' + (r.q_score_mean ?? 'NULL'), 'doi=' + (r.doi || '').slice(0, 40))
-  }
-} catch (e) {
-  console.log('  scored_at column missing:', e.message)
-}
+  const rows = db.prepare(`SELECT mode, ${tsCol} AS ts FROM paper_scores ORDER BY ${tsCol} DESC LIMIT 5`).all()
+  for (const r of rows) console.log('  ', r.ts, r.mode)
+} catch (e) { console.log('  (no timestamp col)', e.message) }
 
 db.close()

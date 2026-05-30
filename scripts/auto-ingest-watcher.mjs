@@ -5,7 +5,7 @@
 // fulltext scorer is writing, and it records every decision to a JSONL log.
 
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -78,7 +78,7 @@ const WATCHERS = [
     paths: [join(DATA_ROOT, 'europepmc-fulltext')],
     logs: [
       join(DATA_ROOT, 'europepmc-fulltext', '_codex-restart.log'),
-      join(DATA_ROOT, '_pmc_via_epmc_2026-05-22.log'),
+      join(DATA_ROOT, '_pmc_via_epmc_*.log'),
     ],
     processPatterns: ['collect-europepmc-fulltext.mjs', 'collect-pmc-via-epmc.mjs'],
     donePattern: /done|complete|finished|254145\/254145/i,
@@ -89,7 +89,7 @@ const WATCHERS = [
     name: 'pdf-fulltext',
     only: 'pdf',
     paths: [join(DATA_ROOT, 'pdf-fulltext')],
-    logs: [join(DATA_ROOT, '_pdf_fulltext_2026-05-22.log')],
+    logs: [join(DATA_ROOT, '_pdf_fulltext_*.log')],
     processPatterns: ['collect-pdf-fulltext.mjs'],
     donePattern: /done|complete|finished|nothing to do/i,
     checkpoint: true,
@@ -117,17 +117,60 @@ function log(event, extra = {}) {
 function pathMtime(path) {
   if (!existsSync(path)) return 0
   const st = statSync(path)
-  if (st.isDirectory()) return st.mtimeMs
-  return st.mtimeMs
+  if (!st.isDirectory()) return st.mtimeMs
+  // Directory: find newest *.jsonl shard inside (non-recursive).
+  let best = 0
+  try {
+    for (const name of readdirSync(path)) {
+      if (!name.endsWith('.jsonl')) continue
+      const child = join(path, name)
+      try {
+        const childSt = statSync(child)
+        if (childSt.isFile() && childSt.mtimeMs > best) best = childSt.mtimeMs
+      } catch {}
+    }
+  } catch {}
+  // Fall back to directory mtime if no shards exist yet.
+  return best || st.mtimeMs
 }
 
 function latestMtime(paths) {
   return Math.max(0, ...paths.map(pathMtime))
 }
 
+function expandLogPath(path) {
+  // Glob expansion: if path contains '*' or '?', resolve against parent
+  // directory and return newest matching file. Literal paths pass through.
+  if (!path.includes('*') && !path.includes('?')) return path
+  const dir = dirname(path)
+  const pattern = path.slice(dir.length + 1)
+  const regex = new RegExp('^' + pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.') + '$')
+  if (!existsSync(dir)) return path
+  let best = null
+  let bestMtime = 0
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!regex.test(name)) continue
+      const child = join(dir, name)
+      try {
+        const st = statSync(child)
+        if (st.isFile() && st.mtimeMs > bestMtime) {
+          best = child
+          bestMtime = st.mtimeMs
+        }
+      } catch {}
+    }
+  } catch {}
+  return best || path
+}
+
 function tail(path, bytes = 65536) {
-  if (!existsSync(path)) return ''
-  const text = readFileSync(path, 'utf8')
+  const resolved = expandLogPath(path)
+  if (!existsSync(resolved)) return ''
+  const text = readFileSync(resolved, 'utf8')
   return text.slice(Math.max(0, text.length - bytes))
 }
 
@@ -145,10 +188,14 @@ function activeNodeProcesses() {
     'Get-CimInstance Win32_Process -Filter "name = \'node.exe\'"',
     'ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
   ].join(' | ')
-  return powershellLines(script).map(line => {
+  const procs = powershellLines(script).map(line => {
     const [pid, ...rest] = line.split('\t')
     return { pid: Number(pid), command: rest.join('\t') }
   })
+  // Watcher itself is a node process, so zero results means the snapshot is
+  // bogus (powershell glitch, timeout, etc). Signal invalid to caller.
+  if (procs.length === 0) return null
+  return procs
 }
 
 function isActive(processes, pattern) {
@@ -184,7 +231,11 @@ function acquireLock() {
   if (existsSync(LOCK_PATH)) {
     const old = loadJson(LOCK_PATH, null)
     if (old?.pid) {
-      const active = activeNodeProcesses().some(p => p.pid === old.pid)
+      const snapshot = activeNodeProcesses()
+      // If snapshot is null (powershell glitch), assume the lock might still
+      // be held and refuse to start rather than racing the old process.
+      if (snapshot === null) throw new Error(`auto-ingest watcher lock present (pid ${old.pid}); process snapshot unavailable, refusing to start`)
+      const active = snapshot.some(p => p.pid === old.pid)
       if (active) throw new Error(`auto-ingest watcher already running with pid ${old.pid}`)
     }
   }
@@ -193,6 +244,11 @@ function acquireLock() {
 
 async function tick(state) {
   const processes = activeNodeProcesses()
+  if (processes === null) {
+    // Bogus snapshot — don't update `done` state or trigger ingest this tick.
+    log('watch_skip_invalid_snapshot')
+    return
+  }
   const q500Active = isActive(processes, 'score-codex-q500-fulltext')
   for (const watcher of WATCHERS) {
     const mtime = latestMtime(watcher.paths)
