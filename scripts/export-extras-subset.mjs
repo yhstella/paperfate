@@ -82,16 +82,29 @@ if (extraCols.length === 0) {
 }
 
 // We only want columns from paper_extras_v2 in the output rows; alias them
-// with the table prefix to avoid collisions with papers.real_jcr_jif used for
+// with the table prefix to avoid collisions with the JIF column used for
 // ordering / filtering.
+//
+// The DB schema has no papers.real_jcr_jif. JIF lives in
+// journal_year_metrics.jcr_jif keyed by (issn, year). Use a LEFT JOIN
+// chain that resolves the manuscript's JIF via the same path the model
+// inference uses: papers -> issn+year -> journal_year_metrics.jcr_jif.
+// Fallback to a venue-level proxy (journals.two_yr_mean_citedness scaled)
+// when the year-specific row is missing.
 const selectList = extraCols.map(c => `pe.${quoteIdent(c)}`).join(', ')
+const IF_PROXY_SCALE = 0.9
 
 const sql = `
-  SELECT ${selectList}, p.real_jcr_jif AS __jif
+  SELECT
+    ${selectList},
+    COALESCE(jym.jcr_jif, j.two_yr_mean_citedness * ${IF_PROXY_SCALE}) AS __jif
   FROM paper_extras_v2 pe
   JOIN papers p ON pe.doi = p.doi
-  WHERE p.real_jcr_jif >= ?
-  ORDER BY p.real_jcr_jif DESC
+  LEFT JOIN journal_year_metrics jym
+    ON jym.issn = p.issn AND jym.year = p.year
+  LEFT JOIN journals j ON j.issn_l = p.issn
+  WHERE COALESCE(jym.jcr_jif, j.two_yr_mean_citedness * ${IF_PROXY_SCALE}) >= ?
+  ORDER BY __jif DESC
   LIMIT ?
 `
 
