@@ -1,3 +1,6 @@
+import { useEffect, useRef } from 'react'
+import { trackEvent } from '../lib/telemetry.js'
+
 export default function ResultPanel({ result, input }) {
   const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures, adjustedJif } = result
 
@@ -23,20 +26,69 @@ export default function ResultPanel({ result, input }) {
     ? (adjustedJif.point - inputJifPoint)
     : null
 
+  const hasJourney = Array.isArray(journey) && journey.length > 0
+  const hasSimilar = Array.isArray(similars) && similars.length > 0
+  const hasRefs = !!(referencesSummary && referencesSummary.n_resolved > 0)
+
+  // 'result_render' — fires once per mount / per props identity change.
+  useEffect(() => {
+    trackEvent('result_render', {
+      extractor_used: extractorUsed || null,
+      degraded: !!degradedMode,
+      has_journey: hasJourney,
+      has_similar: hasSimilar,
+      has_refs: hasRefs,
+    })
+  }, [extractorUsed, degradedMode, hasJourney, hasSimilar, hasRefs])
+
+  // 'result_banner_view' — one-shot when degraded banner becomes visible
+  // for this mount. Tracked via ref so re-renders don't re-fire.
+  const bannerFiredRef = useRef(false)
+  useEffect(() => {
+    if (degradedMode && !bannerFiredRef.current) {
+      bannerFiredRef.current = true
+      trackEvent('result_banner_view', { extractor_used: extractorUsed || null })
+    }
+  }, [degradedMode, extractorUsed])
+
+  // 'result_journey_step_view' — debounced to one event per render even
+  // though there are N step <li>s. We fire from a single effect that
+  // reports the step count rather than once per row.
+  useEffect(() => {
+    if (hasJourney) {
+      trackEvent('result_journey_step_view', { steps: journey.length })
+    }
+  }, [hasJourney, journey?.length])
+
+  const onSimilarClick = (paper, idx) => {
+    trackEvent('result_similar_click', {
+      idx,
+      venue: typeof paper?.venue === 'string' ? paper.venue.slice(0, 80) : null,
+      year: Number.isFinite(paper?.year) ? paper.year : null,
+    })
+  }
+
   return (
     <div className="card p-6 animate-fade-up">
       {degradedMode && (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-50/10 px-4 py-3 text-sm text-amber-200">
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-4 rounded-lg border border-amber-500/40 bg-amber-50/10 px-4 py-3 text-sm text-amber-100"
+        >
           LLM scoring unavailable right now — showing rule-only forecast. Q-rubric domain breakdowns are degraded; please retry shortly.
         </div>
       )}
 
       <div className="mb-5 flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-xs uppercase tracking-wider text-slate-400">Forecast for</div>
-          <div className="mt-0.5 font-serif text-lg italic text-slate-200">
+          <div className="text-xs uppercase tracking-wider text-slate-400" id="forecast-for-label">Forecast for</div>
+          <h2
+            aria-labelledby="forecast-for-label"
+            className="mt-0.5 font-serif text-lg italic font-normal text-slate-200"
+          >
             "{titleDisplay.slice(0, 90)}{titleTrunc ? '…' : ''}"
-          </div>
+          </h2>
           {hasInputsStrip && (
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
               <span>
@@ -45,7 +97,7 @@ export default function ResultPanel({ result, input }) {
                 {runMode ? ` · mode ${runMode}` : ''}
               </span>
               {authorMismatch && (
-                <span className="chip border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]">
+                <span className="chip border-amber-400/30 text-amber-100 bg-amber-400/[0.06]">
                   0 of {authorsCount} author names matched OpenAlex — names may be malformed
                 </span>
               )}
@@ -57,7 +109,14 @@ export default function ResultPanel({ result, input }) {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card title="Expected journal tier" tone="primary">
-          <div className="text-2xl font-semibold">
+          <div
+            className="text-2xl font-semibold"
+            aria-label={
+              adjustedJif && adjustedJif.is_adjusted
+                ? `Journal Impact Factor ${adjustedJif.point}${Number.isFinite(tier?.ci_low) && Number.isFinite(tier?.ci_high) ? `, 90 percent confidence interval ${tier.ci_low} to ${tier.ci_high}` : ''}`
+                : `Expected journal tier ${tier?.range || 'unavailable'}`
+            }
+          >
             {adjustedJif && adjustedJif.is_adjusted
               ? `JIF ${adjustedJif.point}${Number.isFinite(tier?.ci_low) && Number.isFinite(tier?.ci_high) ? ` (90% CI ${tier.ci_low}–${tier.ci_high})` : ''}`
               : (tier?.range || '—')}
@@ -67,7 +126,10 @@ export default function ResultPanel({ result, input }) {
               <div className="mt-1 text-xs text-slate-400">Best-fit: {tier?.bestFit || '—'}</div>
               <div className="mt-2 flex flex-wrap gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
                 {Number.isFinite(adjustedDelta) && (
-                  <span className={`chip ${adjustedDelta >= 0 ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' : 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]'}`}>
+                  <span
+                    aria-label={`${adjustedDelta >= 0 ? 'Adjusted lift' : 'Adjusted drop'} of ${adjustedDelta.toFixed(2)} JIF`}
+                    className={`chip ${adjustedDelta >= 0 ? 'border-emerald-400/30 text-emerald-200 bg-emerald-400/[0.06]' : 'border-amber-400/30 text-amber-100 bg-amber-400/[0.06]'}`}
+                  >
                     {adjustedDelta >= 0 ? '↑' : '↓'} {inputJifPoint?.toFixed?.(2)} → {adjustedJif.point} ({adjustedDelta >= 0 ? '+' : ''}{adjustedDelta.toFixed(2)})
                   </span>
                 )}
@@ -96,7 +158,7 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-1 text-xs text-slate-500">{timeline?.note}</div>
           {fatecoreMeta?.timelineModel && fatecoreMeta.timelineModel !== 'not_loaded' && (
             <div className="mt-2">
-              <span className="chip border-fate-400/30 text-fate-300/90 bg-fate-400/[0.06] text-[10px]">
+              <span className="chip border-fate-400/30 text-fate-200 bg-fate-400/[0.06] text-[10px]">
                 {fatecoreMeta.timelineModel === 'fatecore-v0.4-timeline' ? 'model v0.4' : fatecoreMeta.timelineModel}
               </span>
             </div>
@@ -129,26 +191,33 @@ export default function ResultPanel({ result, input }) {
       </div>
 
       {journey && journey.length > 0 && (
-        <div className="mt-8">
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">
+        <section className="mt-8" aria-labelledby="journey-heading">
+          <h3 id="journey-heading" className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">
             Recommended submission journey
           </h3>
           <p className="mb-4 text-xs text-slate-500">
             An ordered sequence to try if a submission is declined. Each step is chosen so the
             manuscript needs minimal reformatting to move on.
           </p>
-          <ol className="space-y-3">
+          <ol className="space-y-3" aria-label={`Submission journey, ${journey.length} steps`}>
             {journey.map((j, i) => (
-              <li key={i} className="flex gap-3 rounded-lg border border-white/5 bg-ink-900/60 p-4">
+              <li
+                key={i}
+                aria-label={`Step ${j.step}: ${j.venue}${Number.isFinite(+j.if) ? `, Journal Impact Factor ${j.if}` : ''}`}
+                className="flex gap-3 rounded-lg border border-white/5 bg-ink-900/60 p-4"
+              >
                 <div className="flex-none">
-                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-fate-500/20 text-xs font-semibold text-fate-300">
+                  <div
+                    aria-hidden="true"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-fate-500/20 text-xs font-semibold text-fate-300"
+                  >
                     {j.step}
                   </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="font-semibold text-slate-100">{j.venue}</span>
-                    <span className="chip">IF {j.if}</span>
+                    <span className="chip" aria-label={`Journal Impact Factor ${j.if}`}>IF {j.if}</span>
                     <span className="chip">{j.publisher}</span>
                   </div>
                   <div className="mt-1 text-xs text-slate-400">{j.style}</div>
@@ -156,10 +225,10 @@ export default function ResultPanel({ result, input }) {
                     <span
                       title={i === 0 || j.switchCostValue == null ? undefined : `cost ${j.switchCostValue.toFixed(3)} on 0–1 scale (category jaccard + publisher + |Δlog IF| + OA model)`}
                       className={`chip ${
-                      j.switchCost === 'minimal' || j.switchCost === 'first submission' ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' :
+                      j.switchCost === 'minimal' || j.switchCost === 'first submission' ? 'border-emerald-400/30 text-emerald-200 bg-emerald-400/[0.06]' :
                       j.switchCost === 'low' ? 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' :
-                      j.switchCost === 'moderate' ? 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' :
-                      'border-rose-400/30 text-rose-300/90 bg-rose-400/[0.06]'
+                      j.switchCost === 'moderate' ? 'border-amber-400/30 text-amber-100 bg-amber-400/[0.06]' :
+                      'border-rose-400/30 text-rose-200 bg-rose-400/[0.06]'
                     }`}>
                       {i === 0 ? 'start' : `switch cost · ${j.switchCost}${Number.isFinite(j.switchCostValue) ? ` (${j.switchCostValue.toFixed(2)})` : ''}`}
                     </span>
@@ -169,12 +238,12 @@ export default function ResultPanel({ result, input }) {
               </li>
             ))}
           </ol>
-        </div>
+        </section>
       )}
 
       {adjustedJif && adjustedJif.is_adjusted && (
-        <div className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Adjusted JIF estimate</div>
+        <section className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Adjusted JIF estimate</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="text-2xl font-semibold text-slate-100">{adjustedJif.point}</span>
             <span className="chip">manuscript-only model {adjustedJif.baseline}</span>
@@ -185,12 +254,12 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-2 text-[11px] text-slate-500">
             Model alone (R²(log JIF)≈0.43) compresses to mid-tier; this blends in bibliography, target-journal prior IF, and senior-author h-index.
           </div>
-        </div>
+        </section>
       )}
 
       {authorFeatures && authorFeatures.team_size_with_id > 0 && (
-        <div className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Author profile</div>
+        <section className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Author profile</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="text-sm text-slate-200">{authorFeatures.team_size_with_id} of {(authorFeatures.resolved || []).length} authors resolved</span>
             {Number.isFinite(authorFeatures.first_author_h_index) && <span className="chip">first-author h {authorFeatures.first_author_h_index}</span>}
@@ -211,19 +280,19 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-2 text-[11px] text-slate-500">
             Names matched via OpenAlex top-result — verify if the field has common names.
           </div>
-        </div>
+        </section>
       )}
 
       {!hideCounterfactuals && jointCounterfactual && jointCounterfactual.items_count >= 2 && (
-        <div className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you fix all top {jointCounterfactual.items_count}</div>
+        <section className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you fix all top {jointCounterfactual.items_count}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="text-2xl font-semibold text-slate-100">
               +{jointCounterfactual.predicted_jif_lift?.toFixed?.(2)} <span className="text-base font-normal text-slate-400">JIF together</span>
             </span>
             <span className="chip">baseline {jointCounterfactual.baseline_jif?.toFixed?.(2)}</span>
             <span className="chip">lifted {jointCounterfactual.lifted_jif?.toFixed?.(2)}</span>
-            <span className={`chip ${Math.abs(jointCounterfactual.interaction_gap) < 0.05 ? '' : jointCounterfactual.interaction_gap > 0 ? 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' : 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]'}`}>
+            <span className={`chip ${Math.abs(jointCounterfactual.interaction_gap) < 0.05 ? '' : jointCounterfactual.interaction_gap > 0 ? 'border-emerald-400/30 text-emerald-200 bg-emerald-400/[0.06]' : 'border-amber-400/30 text-amber-100 bg-amber-400/[0.06]'}`}>
               {jointCounterfactual.interaction_gap > 0 ? '+' : ''}{jointCounterfactual.interaction_gap?.toFixed?.(2)} vs sum
             </span>
           </div>
@@ -233,12 +302,12 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-2 text-[11px] text-slate-500">
             Joint fix of the top {jointCounterfactual.items_count} weaknesses; 'vs sum' positive ⇒ super-additive interaction.
           </div>
-        </div>
+        </section>
       )}
 
       {targetJournal && (
-        <div className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you submit to your target</div>
+        <section className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you submit to your target</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="font-semibold text-slate-100">{targetJournal.name}</span>
             {targetJournal.issn && <span className="chip">ISSN {targetJournal.issn}</span>}
@@ -255,12 +324,12 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-2 text-[11px] text-slate-500">
             Anchor only — manuscript-level forecast above is independent of this IF.
           </div>
-        </div>
+        </section>
       )}
 
       {referencesSummary && referencesSummary.n_resolved > 0 && (
-        <div className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Your bibliography</div>
+        <section className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Your bibliography</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="text-sm text-slate-200">
               {referencesSummary.n_resolved}/{referencesSummary.n_input} references resolved
@@ -295,9 +364,9 @@ export default function ResultPanel({ result, input }) {
             (() => {
               const ratio = manuscriptJifPoint / referencesSummary.median_jif
               let verdict, tone
-              if (ratio >= 0.5 && ratio <= 2.0) { verdict = 'matched'; tone = 'border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]' }
-              else if (ratio < 0.5) { verdict = 'bibliography tier higher — stretch targets worth trying'; tone = 'border-fate-400/30 text-fate-300 bg-fate-400/[0.06]' }
-              else { verdict = 'bibliography tier lower — broader-impact framing may help'; tone = 'border-amber-400/30 text-amber-200/90 bg-amber-400/[0.06]' }
+              if (ratio >= 0.5 && ratio <= 2.0) { verdict = 'matched'; tone = 'border-emerald-400/30 text-emerald-200 bg-emerald-400/[0.06]' }
+              else if (ratio < 0.5) { verdict = 'bibliography tier higher — stretch targets worth trying'; tone = 'border-fate-400/30 text-fate-200 bg-fate-400/[0.06]' }
+              else { verdict = 'bibliography tier lower — broader-impact framing may help'; tone = 'border-amber-400/30 text-amber-100 bg-amber-400/[0.06]' }
               return (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   <span className={`chip ${tone}`}>manuscript JIF {manuscriptJifPoint.toFixed(2)} vs refs median {referencesSummary.median_jif} → {verdict}</span>
@@ -308,39 +377,46 @@ export default function ResultPanel({ result, input }) {
           <div className="mt-2 text-[11px] text-slate-500">
             Descriptive sanity-check vs. the literature you cite.
           </div>
-        </div>
+        </section>
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         {suggestions && suggestions.length > 0 && (
-          <div className="lg:col-span-3">
+          <section className="lg:col-span-3">
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">How to lift impact</h3>
-            <ul className="space-y-2 text-sm text-slate-300">
+            <ol className="space-y-2 text-sm text-slate-300">
               {suggestions.map((s, i) => (
                 <li key={i} className="flex gap-3 rounded-lg border border-white/5 bg-ink-900/60 p-3">
-                  <span className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-fate-500/20 text-xs font-semibold text-fate-300">{i + 1}</span>
+                  <span aria-hidden="true" className="mt-0.5 inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-fate-500/20 text-xs font-semibold text-fate-300">{i + 1}</span>
                   <span>{s}</span>
                 </li>
               ))}
-            </ul>
-          </div>
+            </ol>
+          </section>
         )}
-        <div className={(suggestions && suggestions.length > 0) ? 'lg:col-span-2' : 'lg:col-span-5'}>
+        <section className={(suggestions && suggestions.length > 0) ? 'lg:col-span-2' : 'lg:col-span-5'}>
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Most similar published papers</h3>
           <ul className="space-y-2">
             {similars.map((p, i) => (
-              <li key={i} className="rounded-lg border border-white/5 bg-ink-900/60 p-3">
-                <div className="line-clamp-2 text-sm text-slate-200">{p.title}</div>
-                <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-400">
-                  <span className="chip">{p.venue}</span>
-                  <span className="chip">IF {p.if}</span>
-                  <span className="chip">{p.year}</span>
-                  <span className="chip">{p.citations}× cited</span>
-                </div>
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => onSimilarClick(p, i)}
+                  aria-label={`Similar paper: ${p.title}, published in ${p.venue} (${p.year}), Journal Impact Factor ${p.if}, ${p.citations} citations`}
+                  className="block w-full text-left rounded-lg border border-white/5 bg-ink-900/60 p-3 transition hover:border-fate-400/30 hover:bg-ink-900/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+                >
+                  <div className="line-clamp-2 text-sm text-slate-200">{p.title}</div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-300">
+                    <span className="chip">{p.venue}</span>
+                    <span className="chip" aria-label={`Journal Impact Factor ${p.if}`}>IF {p.if}</span>
+                    <span className="chip" aria-label={`Year ${p.year}`}>{p.year}</span>
+                    <span className="chip" aria-label={`${p.citations} citations`}>{p.citations}× cited</span>
+                  </div>
+                </button>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-3 text-xs text-slate-500">
@@ -366,10 +442,10 @@ export default function ResultPanel({ result, input }) {
 function Card({ title, tone, children }) {
   const accent = tone === 'primary' ? 'border-fate-500/30 bg-fate-500/[0.06]' : 'border-white/5 bg-ink-900/60'
   return (
-    <div className={`rounded-xl border p-4 ${accent}`}>
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</div>
+    <section className={`rounded-xl border p-4 ${accent}`}>
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
       {children}
-    </div>
+    </section>
   )
 }
 

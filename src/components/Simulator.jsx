@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures, abstractQuality, DOMAIN_COLORS, DOMAIN_NAMES } from '../lib/forecastClient.js'
 import { extractAll, extractAuthors, extractDois } from '../lib/extractMeta.js'
+import { trackEvent } from '../lib/telemetry.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
 import FileUpload from './FileUpload.jsx'
+
+function roundTo(v, digits = 1) {
+  if (!Number.isFinite(+v)) return null
+  const m = Math.pow(10, digits)
+  return Math.round((+v) * m) / m
+}
 
 const FIELDS = [
   'Auto-detect',
@@ -112,6 +119,38 @@ export default function Simulator() {
   const [quickResult, setQuickResult] = useState(null)
   const [quickError, setQuickError] = useState(null)
 
+  // Track sim_mount exactly once on first render (StrictMode-safe).
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    if (mountedRef.current) return
+    mountedRef.current = true
+    trackEvent('sim_mount', {})
+  }, [])
+
+  // Ref to the form so Ctrl/Cmd+Enter from any text input can request a
+  // native submit (preserves built-in validation + our onSubmit handler).
+  const formRef = useRef(null)
+  function onTextKeyDown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      if (formRef.current && typeof formRef.current.requestSubmit === 'function') {
+        formRef.current.requestSubmit()
+      } else if (formRef.current) {
+        // Fallback for older browsers without requestSubmit().
+        formRef.current.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+      }
+    }
+  }
+
+  // Wrap setInputMode so tab changes fire telemetry. Avoid emitting on the
+  // initial value the component was constructed with.
+  function changeTab(next) {
+    if (next !== inputMode) {
+      trackEvent('sim_tab_change', { tab: next })
+    }
+    setInputMode(next)
+  }
+
   const meta = useMemo(() => extractAll(`${title}\n${text}`), [title, text])
   const charCount = text.length
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
@@ -191,6 +230,7 @@ export default function Simulator() {
     setAuthorsInput('')
     setReferencesAutoDetected(false)
     setAuthorsAutoDetected(false)
+    trackEvent('sim_sample_load', { sample_name: sample.key })
   }
 
   // Resolve the same article_type the main forecast pass would use, so the
@@ -225,18 +265,40 @@ export default function Simulator() {
     setQuickStatus('running')
     setQuickResult(null)
     setQuickError(null)
+    const articleType = resolveArticleType()
+    trackEvent('sim_quick_submit', {
+      article_type: articleType,
+      abstract_len: text.length,
+    })
+    const t0 = Date.now()
     try {
       const r = await abstractQuality({
         title,
         abstract: text,
-        article_type: resolveArticleType(),
+        article_type: articleType,
       })
       setQuickResult(r)
       setQuickStatus('done')
+      const llmHealth = r?.llm_health || null
+      const extractorUsed = r?.extractor_used || null
+      const degraded =
+        (llmHealth && llmHealth.status === 'degraded') ||
+        extractorUsed === 'rule_fallback' ||
+        extractorUsed === 'mock' ||
+        extractorUsed === 'deterministic'
+      trackEvent('sim_quick_result_ok', {
+        wall_ms: Date.now() - t0,
+        extractor_used: extractorUsed || 'unknown',
+        degraded: !!degraded,
+        overall_score: Number.isFinite(+r?.overall_score) ? Math.round(+r.overall_score) : null,
+      })
     } catch (err) {
       console.warn('abstractQuality failed:', err.message)
       setQuickError(err.message || 'Quick check unavailable')
       setQuickStatus('error')
+      trackEvent('sim_quick_result_error', {
+        http_or_code: (err && (err.code || err.status || err.message?.slice(0, 80))) || 'unknown',
+      })
     }
   }
 
@@ -279,6 +341,24 @@ export default function Simulator() {
       endpoints:   meta.endpoints?.value || [],
       target:      overrides.target && overrides.target !== 'Auto-recommend' ? overrides.target : 'IF 5–10',
       mode: inputMode === 'full' ? 'Q500' : 'Q100',
+    }
+    const submitStartedAt = Date.now()
+    // Snapshot submit-time props (no manuscript text).
+    {
+      const hasAuthors = authorsInput.trim().length > 0
+      const hasRefs = referencesInput.trim().length > 0
+      const hasTarget = targetJournalInput.trim().length > 0
+      const bodyLen = inputMode === 'full' ? text.length : 0
+      const absLen = inputMode === 'full' ? 0 : text.length
+      trackEvent('sim_forecast_submit', {
+        mode: input.mode,
+        has_authors: hasAuthors,
+        has_refs: hasRefs,
+        has_target: hasTarget,
+        article_type: articleType,
+        abstract_len: absLen,
+        body_len: bodyLen,
+      })
     }
     try {
       // Production: hit /api/forecast (server-side Gemini scoring).
@@ -347,9 +427,26 @@ export default function Simulator() {
           .catch(err => console.warn('author-aware refine failed:', err.message))
       }
       setStatus('done')
+      const llmHealth = rNoAuthor?.llm_health || null
+      const extractorUsed = rNoAuthor?.extractor_used || (rNoAuthor?.mode === 'mock' ? 'mock' : 'llm')
+      const degraded =
+        ['mock', 'rule_fallback', 'deterministic'].includes(extractorUsed) ||
+        (llmHealth && llmHealth.status === 'degraded')
+      const predJif = rNoAuthor?.predictions?.jcr_jif?.point
+      const itemsScored = rNoAuthor?.pipeline?.llm_items
+      trackEvent('sim_forecast_result_ok', {
+        wall_ms: Date.now() - submitStartedAt,
+        extractor_used: extractorUsed || 'unknown',
+        items_scored: Number.isFinite(+itemsScored) ? +itemsScored : null,
+        degraded: !!degraded,
+        predicted_jif: roundTo(predJif, 1),
+      })
     } catch (err) {
       console.error('forecast failed:', err)
       setStatus('idle')
+      trackEvent('sim_forecast_result_error', {
+        http_or_code: (err && (err.code || err.status || err.message?.slice(0, 80))) || 'unknown',
+      })
     }
   }
 
@@ -377,6 +474,7 @@ export default function Simulator() {
                   key={s.key}
                   type="button"
                   onClick={() => loadSample(s)}
+                  aria-label={`Load sample manuscript: ${s.label}`}
                   className="rounded-md border border-fate-400/30 bg-fate-400/[0.06] px-2.5 py-1 text-xs text-fate-300 hover:bg-fate-400/[0.12] transition-colors"
                 >
                   {s.label}
@@ -389,12 +487,12 @@ export default function Simulator() {
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="card p-5 sm:p-6 lg:col-span-3">
+        <form ref={formRef} onSubmit={onSubmit} className="card p-5 sm:p-6 lg:col-span-3" aria-label="Manuscript forecast form">
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <Tabs
                 value={inputMode}
-                onChange={setInputMode}
+                onChange={changeTab}
                 options={[
                   { value: 'abstract', label: 'Abstract' },
                   { value: 'full', label: 'Full manuscript' },
@@ -417,56 +515,98 @@ export default function Simulator() {
               </div>
             )}
 
-            <Field label="Title">
+            <Field label="Title" htmlFor="sim-title">
               <input
+                id="sim-title"
                 value={title} onChange={e => setTitle(e.target.value)}
+                onKeyDown={onTextKeyDown}
                 placeholder="Your manuscript title"
+                aria-label="Manuscript title"
                 className="input"
               />
             </Field>
 
-            <Field label={inputMode === 'full' ? 'Full manuscript file' : 'Abstract'}>
+            <div
+              role="tabpanel"
+              id={`sim-tabpanel-${inputMode}`}
+              aria-labelledby={`sim-tab-${inputMode}`}
+            >
+            <Field label={inputMode === 'full' ? 'Full manuscript file' : 'Abstract'} htmlFor={inputMode === 'full' ? undefined : 'sim-abstract-textarea'}>
               {inputMode === 'full' ? (
                 <FileUpload
-                  onText={setText}
+                  onText={(t) => {
+                    setText(t)
+                    if (t && typeof t === 'string' && t.length > 0) {
+                      // We don't have direct access to the File object here.
+                      // FileUpload owns the filename UI; emit a coarse event
+                      // (extension defaults to 'unknown' — the parser already
+                      // normalised the text). derived_title reflects whether
+                      // a non-empty title is now present (the Field above
+                      // also receives the derived title via onTitle).
+                      trackEvent('sim_file_upload', {
+                        filename_extension: 'unknown',
+                        derived_title: !!title.trim(),
+                        text_len: t.length,
+                      })
+                    }
+                  }}
                   onTitle={(t) => { if (!title.trim()) setTitle(t) }}
                   currentTextLength={charCount}
                 />
               ) : (
                 <textarea
+                  id="sim-abstract-textarea"
                   value={text} onChange={e => setText(e.target.value)}
+                  onKeyDown={onTextKeyDown}
                   rows={9}
                   placeholder={PLACEHOLDER}
+                  aria-label="Abstract text"
                   className="input resize-y leading-relaxed"
                 />
               )}
             </Field>
+            </div>
 
-            <Field label="Target journal (optional)">
+            <Field label="Target journal (optional)" htmlFor="sim-target-journal">
               <input
+                id="sim-target-journal"
                 value={targetJournalInput}
                 onChange={e => setTargetJournalInput(e.target.value)}
+                onKeyDown={onTextKeyDown}
                 placeholder="e.g. The Lancet, JAMA, 0028-4793"
+                aria-label="Target journal (optional)"
                 className="input"
               />
             </Field>
 
-            <Field label={`Authors${authorsAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}>
+            <Field
+              label={`Authors${authorsAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}
+              htmlFor="sim-authors"
+            >
               <textarea
+                id="sim-authors"
                 value={authorsInput}
                 onChange={e => { setAuthorsInput(e.target.value); setAuthorsAutoDetected(false) }}
+                onKeyDown={onTextKeyDown}
                 rows={2}
                 placeholder="Jane Smith&#10;John Doe"
+                aria-label="Authors (optional, one per line)"
                 className="input resize-y"
               />
             </Field>
 
-            <Field label={`Reference DOIs${referencesAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}>
+            <Field
+              label={`Reference DOIs${referencesAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}
+              htmlFor="sim-references"
+            >
               <textarea
+                id="sim-references"
                 value={referencesInput}
                 onChange={e => { setReferencesInput(e.target.value); setReferencesAutoDetected(false) }}
+                onKeyDown={onTextKeyDown}
                 rows={2}
                 placeholder="10.1056/NEJMoa1504720"
+                aria-label="Reference DOIs (optional, one per line)"
                 className="input resize-y"
               />
             </Field>
@@ -479,7 +619,12 @@ export default function Simulator() {
             />
 
             <div className="flex items-center justify-between pt-2 gap-3 sticky bottom-0 sm:static bg-ink-950/95 backdrop-blur p-3 -mx-5 sm:mx-0">
-              <div className="text-xs text-slate-500 min-w-0">
+              <div
+                className="text-xs text-slate-500 min-w-0"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
                 {status === 'running' ? (
                   <div>
                     <div>
@@ -487,7 +632,14 @@ export default function Simulator() {
                       <span className="text-slate-500"> / expected {inputMode === 'full' ? '30–90s' : '5–15s'}</span>
                       {progressLabel && <span className="ml-2 text-fate-300/90">· {progressLabel}…</span>}
                     </div>
-                    <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/5">
+                    <div
+                      className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/5"
+                      role="progressbar"
+                      aria-label="Forecast progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.min(95, Math.round((elapsedSec / (inputMode === 'full' ? 60 : 10)) * 100))}
+                    >
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-fate-500 to-fate-300 transition-all duration-500"
                         style={{ width: `${Math.min(95, (elapsedSec / (inputMode === 'full' ? 60 : 10)) * 100)}%` }}
@@ -504,13 +656,20 @@ export default function Simulator() {
                     type="button"
                     onClick={onQuickCheck}
                     disabled={!canRun || quickStatus === 'running'}
+                    aria-disabled={!canRun || quickStatus === 'running'}
+                    aria-label="Run quick rubric check on title and abstract"
                     title="Lightweight rubric check on title + abstract only. Doesn't replace the full forecast."
                     className="text-xs text-slate-300 hover:text-slate-100 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     {quickStatus === 'running' ? <>Checking<Dots /></> : 'Quick rubric check'}
                   </button>
                 )}
-                <button disabled={!canRun || status === 'running'} className="btn-primary shrink-0">
+                <button
+                  disabled={!canRun || status === 'running'}
+                  aria-disabled={!canRun || status === 'running'}
+                  aria-label="Run full PaperFate forecast"
+                  className="btn-primary shrink-0"
+                >
                   {status === 'running' ? <>Simulating<Dots /></> : 'Simulate fate'}
                 </button>
               </div>
@@ -819,12 +978,14 @@ function DetectedRow({ item, value, onChange }) {
           value={value ?? detected ?? ''}
           onChange={e => onChange(e.target.value ? Number(e.target.value) : '')}
           placeholder="(auto)"
+          aria-label={item.label}
           className="input"
         />
       ) : (
         <select
           value={value ?? (detected || item.options[0])}
           onChange={e => onChange(e.target.value)}
+          aria-label={item.label}
           className="input"
         >
           {item.options.map(o => <option key={o} value={o}>{o}{o === detected ? '  ← detected' : ''}</option>)}
@@ -846,30 +1007,60 @@ function ConfidenceLegend() {
 
 function Tabs({ value, onChange, options }) {
   return (
-    <div className="inline-flex rounded-lg border border-white/10 bg-ink-900 p-1 text-xs">
-      {options.map(o => (
-        <button
-          key={o.value} type="button"
-          onClick={() => onChange(o.value)}
-          className={`rounded-md px-3 py-1.5 transition ${value === o.value ? 'bg-fate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div
+      role="tablist"
+      aria-label="Input mode"
+      className="inline-flex rounded-lg border border-white/10 bg-ink-900 p-1 text-xs"
+    >
+      {options.map(o => {
+        const selected = value === o.value
+        return (
+          <button
+            key={o.value} type="button"
+            role="tab"
+            id={`sim-tab-${o.value}`}
+            aria-selected={selected}
+            aria-controls={`sim-tabpanel-${o.value}`}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(o.value)}
+            className={`rounded-md px-3 py-1.5 transition ${selected ? 'bg-fate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-function Field({ label, hint, children }) {
-  return (
-    <label className="block">
+function Field({ label, hint, children, htmlFor }) {
+  // When htmlFor is provided we render a non-wrapping <label htmlFor=…> so
+  // assistive tech treats the explicit id linkage as authoritative. The
+  // wrapping <label> form is kept for legacy call sites that don't pass an
+  // id. Both shapes render identical visual markup.
+  const inner = (
+    <>
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</span>
         {hint && <span className="text-[11px] text-slate-500">{hint}</span>}
       </div>
       {children}
-    </label>
+    </>
   )
+  if (htmlFor) {
+    return (
+      <div className="block">
+        <label htmlFor={htmlFor} className="block">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</span>
+            {hint && <span className="text-[11px] text-slate-500">{hint}</span>}
+          </div>
+        </label>
+        {children}
+      </div>
+    )
+  }
+  return <label className="block">{inner}</label>
 }
 
 function Bullet({ children }) {
@@ -888,14 +1079,23 @@ function Dots() {
 function QuickRubricPreview({ status, result, error }) {
   if (status === 'running') {
     return (
-      <div className="mt-2 rounded-md border border-white/5 bg-ink-900/60 p-3 text-[11px] text-slate-400 animate-pulse" style={{ maxHeight: 120 }}>
+      <div
+        className="mt-2 rounded-md border border-white/5 bg-ink-900/60 p-3 text-[11px] text-slate-400 animate-pulse"
+        style={{ maxHeight: 120 }}
+        role="status"
+        aria-live="polite"
+      >
         Running quick rubric check…
       </div>
     )
   }
   if (status === 'error') {
     return (
-      <div className="mt-2 rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-3 text-[11px] text-amber-200/80" style={{ maxHeight: 120 }}>
+      <div
+        className="mt-2 rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-3 text-[11px] text-amber-200/80"
+        style={{ maxHeight: 120 }}
+        role="alert"
+      >
         Quick rubric check unavailable{error ? ` — ${error.slice(0, 100)}` : ''}.
       </div>
     )

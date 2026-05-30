@@ -1,21 +1,52 @@
+import { trackEvent } from '../lib/telemetry.js'
 import { FATECORE_VERSION } from '../lib/version.js'
 
 export default function Nav() {
+  const onNavClick = (target) => {
+    trackEvent('nav_click', { target })
+  }
   return (
-    <header className="sticky top-0 z-30 border-b border-white/5 bg-ink-950/70 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-white/5 bg-ink-950/70 backdrop-blur" role="banner">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-        <a href="#top" className="flex items-center gap-2">
+        <a
+          href="#top"
+          className="flex items-center gap-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+          aria-label="PaperFate home"
+          onClick={() => onNavClick('home')}
+        >
           <Logo />
           <span className="text-sm font-semibold tracking-tight">
             PaperFate
           </span>
-          <span className="chip ml-1">FateCore {FATECORE_VERSION}</span>
+          <span
+            className="chip ml-1 text-slate-200"
+            role="note"
+            aria-label={`FateCore model version ${FATECORE_VERSION}`}
+          >
+            FateCore {FATECORE_VERSION}
+          </span>
         </a>
-        <nav className="hidden items-center gap-1 sm:flex">
-          <a href="#simulator" className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5">Simulator</a>
-          <a href="#features" className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5">What it predicts</a>
-          <a href="#faq" className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5">FAQ</a>
-          <a href="#simulator" className="btn-primary ml-2 px-4 py-2 text-xs">Try the demo</a>
+        <nav className="hidden items-center gap-1 sm:flex" aria-label="Primary">
+          <a
+            href="#simulator"
+            className="rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+            onClick={() => onNavClick('simulator')}
+          >Simulator</a>
+          <a
+            href="#features"
+            className="rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+            onClick={() => onNavClick('features')}
+          >What it predicts</a>
+          <a
+            href="#faq"
+            className="rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+            onClick={() => onNavClick('faq')}
+          >FAQ</a>
+          <a
+            href="#simulator"
+            className="btn-primary ml-2 px-4 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+            onClick={() => onNavClick('cta_try_demo')}
+          >Try the demo</a>
         </nav>
       </div>
     </header>
