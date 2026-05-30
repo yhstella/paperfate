@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PaperFate · production smoke v2
 //
-// Hits the 9 public API endpoints on paperfate.com (or a configurable base URL)
+// Hits the 11 public API endpoints on paperfate.com (or a configurable base URL)
 // with realistic payloads, asserts response shape + per-endpoint latency
 // budgets, and prints a final table.
 //
@@ -290,6 +290,61 @@ async function probeAbstractQuality() {
   record('abstract-quality', r.status, r.ms, extractor, label, fail_reason)
 }
 
+async function probeStatus() {
+  const path = '/api/status'
+  const budget = 10_000
+  const r = await httpJson('GET', path)
+  let ok = true, fail_reason = ''
+  if (r.networkError) { ok = false; fail_reason = `network: ${r.networkError.message}` }
+  else if (r.status !== 200) { ok = false; fail_reason = `HTTP ${r.status}` }
+  else if (!r.json) { ok = false; fail_reason = 'non-json body' }
+  else if (r.json.server_version !== '0.4.0') { ok = false; fail_reason = `server_version=${r.json.server_version}` }
+  else if (!r.json.deploy_time) { ok = false; fail_reason = 'missing deploy_time' }
+  else if (!Array.isArray(r.json.endpoints) || r.json.endpoints.length < 1) {
+    ok = false; fail_reason = 'endpoints array empty/missing'
+  }
+
+  const label = statusLabel(r.status, r.ms, budget, ok, false)
+  record('status', r.status, r.ms, '-', label, fail_reason)
+}
+
+async function probeExtrasLookup() {
+  const path = '/api/extras-lookup'
+  const budget = 15_000
+  const r = await httpJson('POST', path, { doi: '10.1056/NEJMoa1504720' })
+  let ok = true, fail_reason = '', degraded = false
+  if (r.networkError) {
+    ok = false; fail_reason = `network: ${r.networkError.message}`
+  } else if (r.status === 200) {
+    if (!r.json) { ok = false; fail_reason = 'non-json body' }
+    else if (typeof r.json.found !== 'boolean') { ok = false; fail_reason = 'missing found:boolean' }
+  } else if (r.status === 503) {
+    // Graceful 503 until extras subset file is populated — WARN, not FAIL.
+    if (r.json?.source !== 'unavailable') {
+      ok = false; fail_reason = `503 but source=${r.json?.source}`
+    } else {
+      degraded = true
+    }
+  } else {
+    ok = false; fail_reason = `HTTP ${r.status}`
+  }
+
+  const label = statusLabel(r.status, r.ms, budget, ok, degraded)
+  record('extras-lookup', r.status, r.ms, '-', label, fail_reason)
+}
+
+async function probeTelemetry() {
+  const path = '/api/_telemetry'
+  const budget = 10_000
+  const r = await httpJson('POST', path, { name: 'smoke_test', props: { from: 'smoke-v2' } })
+  let ok = true, fail_reason = ''
+  if (r.networkError) { ok = false; fail_reason = `network: ${r.networkError.message}` }
+  else if (r.status !== 204) { ok = false; fail_reason = `HTTP ${r.status}` }
+
+  const label = statusLabel(r.status, r.ms, budget, ok, false)
+  record('_telemetry', r.status, r.ms, '-', label, fail_reason)
+}
+
 // ─── Print final table ──────────────────────────────────────────────────────
 function pad(s, w) {
   s = String(s ?? '')
@@ -338,6 +393,9 @@ async function main() {
   await probeAuthorFeatures()
   await probeJournalCompare()
   await probeAbstractQuality()
+  await probeStatus()
+  await probeExtrasLookup()
+  await probeTelemetry()
 
   printTable()
 
@@ -346,7 +404,7 @@ async function main() {
   const slow   = rows.filter(r => r.status === 'SLOW').length
   const passed = rows.filter(r => r.status === 'OK').length
   console.log()
-  console.log(`Summary: ${passed} OK, ${warned} WARN, ${slow} SLOW, ${failed} FAIL`)
+  console.log(`Summary (11 endpoints): ${passed} OK, ${warned} WARN, ${slow} SLOW, ${failed} FAIL`)
   process.exit(failed === 0 ? 0 : 1)
 }
 

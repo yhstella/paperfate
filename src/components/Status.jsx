@@ -158,6 +158,52 @@ const PROBES = [
       return { httpStatus: res.status, ok: res.ok, degraded, raw }
     },
   },
+  {
+    key: 'status',
+    label: '/api/status',
+    async run() {
+      const res = await fetch('/api/status', { method: 'GET' })
+      const raw = await safeJson(res)
+      // 200 → green; anything else → red.
+      return { httpStatus: res.status, ok: res.ok, degraded: false, raw }
+    },
+  },
+  {
+    key: 'extras-lookup',
+    label: '/api/extras-lookup',
+    async run() {
+      const res = await fetch('/api/extras-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doi: '10.1056/NEJMoa1504720' }),
+      })
+      const raw = await safeJson(res)
+      // 503 with source:'unavailable' is a known graceful state (subset
+      // file not yet populated) — surface as amber, not red.
+      if (res.status === 503 && raw && raw.source === 'unavailable') {
+        return { httpStatus: res.status, ok: true, degraded: true, raw }
+      }
+      return { httpStatus: res.status, ok: res.ok, degraded: false, raw }
+    },
+  },
+  {
+    key: '_telemetry',
+    label: '/api/_telemetry',
+    async run() {
+      const res = await fetch('/api/_telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'smoke_test', props: { from: 'status-page' } }),
+      })
+      // Telemetry returns 204 No Content — treat 204 as green explicitly
+      // since res.ok is true for 204 but there is no body to parse.
+      if (res.status === 204) {
+        return { httpStatus: 204, ok: true, degraded: true, raw: null }
+      }
+      const raw = await safeJson(res)
+      return { httpStatus: res.status, ok: res.ok, degraded: false, raw }
+    },
+  },
 ]
 
 async function safeJson(res) {
