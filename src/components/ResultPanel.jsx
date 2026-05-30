@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
 import { t } from '../lib/i18n.js'
+import { exportForecastPdf } from '../lib/exportPdf.js'
 
 // Defer below-the-fold sections until after first paint so the hero
 // (title + score dial + 6-tile grid) hits the screen with less inline JSX
@@ -121,6 +122,36 @@ export default function ResultPanel({ result, input }) {
     })
   }
 
+  // Print / Save-as-PDF entrypoint. Gathers the rendered result into the
+  // shape exportForecastPdf expects and opens the print-ready popup.
+  // Errors are swallowed inside exportForecastPdf, so we don't try/catch
+  // here — the worst case is a no-op when popups are blocked.
+  const onExportPdf = () => {
+    const point = Number.isFinite(+adjustedJif?.point)
+      ? +adjustedJif.point
+      : (Number.isFinite(+manuscriptJifPoint) ? +manuscriptJifPoint : null)
+    const ciLow = Number.isFinite(+tier?.ci_low) ? +tier.ci_low : null
+    const ciHigh = Number.isFinite(+tier?.ci_high) ? +tier.ci_high : null
+    const summaryParts = []
+    if (tier?.bestFit) summaryParts.push(`Best-fit venue: ${tier.bestFit}.`)
+    if (tier?.stretch) summaryParts.push(`Stretch venue: ${tier.stretch}.`)
+    if (typeof weakness === 'string' && weakness.trim()) summaryParts.push(weakness.trim())
+    exportForecastPdf({
+      title: safeTitle,
+      manuscript_title: safeTitle,
+      summary: summaryParts.join(' '),
+      predictions: {
+        jcr_jif: point != null ? { point, ci_low: ciLow, ci_high: ciHigh } : null,
+        desk_reject_risk: Number.isFinite(+deskReject?.pct)
+          ? { point: +deskReject.pct, label: deskReject?.label || null }
+          : null,
+        score: Number.isFinite(+score) ? +score : null,
+      },
+      journey: Array.isArray(journey) ? journey : [],
+      similar: Array.isArray(similars) ? similars : [],
+    })
+  }
+
   return (
     <div className="card p-6 animate-fade-up">
       {degradedMode && (
@@ -157,7 +188,22 @@ export default function ResultPanel({ result, input }) {
             </div>
           )}
         </div>
-        <ScoreDial score={score} />
+        <div className="flex flex-none items-center gap-2">
+          <button
+            type="button"
+            onClick={onExportPdf}
+            title="Print / Save as PDF"
+            aria-label="Print or save forecast as PDF"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-ink-900/60 text-slate-300 transition hover:border-fate-400/40 hover:text-fate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M6 9V3h12v6" />
+              <rect x="6" y="14" width="12" height="7" rx="1" />
+              <path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" />
+            </svg>
+          </button>
+          <ScoreDial score={score} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
