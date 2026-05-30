@@ -122,8 +122,45 @@ function corsHeaders(origin) {
   }
 }
 
-function bad(res, status, error, detail = undefined) {
-  return res.status(status).json({ error, ...(detail !== undefined && { detail }) })
+function bad(res, status, error, detail = undefined, requestId = undefined) {
+  return res.status(status).json({
+    error,
+    ...(detail !== undefined && { detail }),
+    ...(requestId !== undefined && { request_id: requestId }),
+  })
+}
+
+// Validation: subset of forecast schema — only title, abstract, article_type
+// are accepted by this endpoint. Additive guard; legacy required-field checks
+// below remain authoritative for back-compat error codes.
+function _isStringAQ(v) { return typeof v === 'string' }
+function validateAbstractQualityBody(body) {
+  const errors = []
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, errors: [{ field: '', code: 'not_object', detail: 'body must be a JSON object' }] }
+  }
+  if (!_isStringAQ(body.title)) {
+    errors.push({ field: 'title', code: 'wrong_type', detail: 'must be string' })
+  } else {
+    const t = body.title.trim()
+    if (t.length < 5)   errors.push({ field: 'title', code: 'too_short', detail: 'min length 5' })
+    if (t.length > 500) errors.push({ field: 'title', code: 'too_long',  detail: 'max length 500' })
+  }
+  if (!_isStringAQ(body.abstract)) {
+    errors.push({ field: 'abstract', code: 'wrong_type', detail: 'must be string' })
+  } else {
+    const a = body.abstract.trim()
+    if (a.length < 200)   errors.push({ field: 'abstract', code: 'too_short', detail: 'min length 200' })
+    if (a.length > 50000) errors.push({ field: 'abstract', code: 'too_long',  detail: 'max length 50000' })
+  }
+  if (body.article_type !== undefined && body.article_type !== null) {
+    if (!_isStringAQ(body.article_type)) {
+      errors.push({ field: 'article_type', code: 'wrong_type', detail: 'must be string' })
+    } else if (body.article_type.length > 64) {
+      errors.push({ field: 'article_type', code: 'too_long', detail: 'max length 64' })
+    }
+  }
+  return { ok: errors.length === 0, errors }
 }
 
 function readBody(req) {
@@ -185,7 +222,13 @@ export default async function handler(req, res) {
   }
 
   let body
-  try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e)) }
+  try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e), request_id) }
+
+  // Structural schema validation (additive — runs BEFORE legacy required checks).
+  const _v = validateAbstractQualityBody(body)
+  if (!_v.ok) {
+    return bad(res, 400, 'invalid_request', { errors: _v.errors }, request_id)
+  }
 
   const { title, abstract, article_type = '*' } = body || {}
 

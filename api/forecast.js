@@ -191,6 +191,134 @@ function readBody(req) {
   return Promise.race([collect, timeout])
 }
 
+// Validation: structural schema check applied AFTER readBody. Additive guard —
+// the existing required-field checks below remain authoritative for back-compat
+// error codes (missing_or_short_title / missing_or_short_abstract). This catches
+// out-of-range / wrong-type optional fields BEFORE we hand them to the extractor.
+const ALLOWED_MODES = new Set(['Q100', 'Q500', 'auto', 'abstract', 'full'])
+function _isString(v) { return typeof v === 'string' }
+function _isFiniteNumber(v) { return typeof v === 'number' && Number.isFinite(v) }
+function _isInteger(v) { return Number.isInteger(v) }
+function _isPlainObject(v) { return v && typeof v === 'object' && !Array.isArray(v) }
+
+function validateForecastBody(body) {
+  const errors = []
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, errors: [{ field: '', code: 'not_object', detail: 'body must be a JSON object' }] }
+  }
+  // title — required, 5..500
+  if (!_isString(body.title)) {
+    errors.push({ field: 'title', code: 'wrong_type', detail: 'must be string' })
+  } else {
+    const t = body.title.trim()
+    if (t.length < 5)   errors.push({ field: 'title', code: 'too_short', detail: 'min length 5' })
+    if (t.length > 500) errors.push({ field: 'title', code: 'too_long',  detail: 'max length 500' })
+  }
+  // abstract — required, 200..50000
+  if (!_isString(body.abstract)) {
+    errors.push({ field: 'abstract', code: 'wrong_type', detail: 'must be string' })
+  } else {
+    const a = body.abstract.trim()
+    if (a.length < 200)   errors.push({ field: 'abstract', code: 'too_short', detail: 'min length 200' })
+    if (a.length > 50000) errors.push({ field: 'abstract', code: 'too_long',  detail: 'max length 50000' })
+  }
+  // mode — optional enum
+  if (body.mode !== undefined && body.mode !== null) {
+    if (!_isString(body.mode) || !ALLOWED_MODES.has(body.mode)) {
+      errors.push({ field: 'mode', code: 'invalid_enum', detail: "one of Q100|Q500|auto" })
+    }
+  }
+  // article_type — optional string<=64
+  if (body.article_type !== undefined && body.article_type !== null) {
+    if (!_isString(body.article_type)) {
+      errors.push({ field: 'article_type', code: 'wrong_type', detail: 'must be string' })
+    } else if (body.article_type.length > 64) {
+      errors.push({ field: 'article_type', code: 'too_long', detail: 'max length 64' })
+    }
+  }
+  // methods/results/discussion/full_text — optional string<=100000
+  for (const f of ['methods', 'results', 'discussion', 'full_text']) {
+    const v = body[f]
+    if (v === undefined || v === null) continue
+    if (!_isString(v)) {
+      errors.push({ field: f, code: 'wrong_type', detail: 'must be string' })
+    } else if (v.length > 100000) {
+      errors.push({ field: f, code: 'too_long', detail: 'max length 100000' })
+    }
+  }
+  // authors — optional array<=50 OR string<=10000
+  if (body.authors !== undefined && body.authors !== null) {
+    if (Array.isArray(body.authors)) {
+      if (body.authors.length > 50) {
+        errors.push({ field: 'authors', code: 'too_many', detail: 'max 50 authors' })
+      }
+    } else if (_isString(body.authors)) {
+      if (body.authors.length > 10000) {
+        errors.push({ field: 'authors', code: 'too_long', detail: 'max length 10000' })
+      }
+    } else {
+      errors.push({ field: 'authors', code: 'wrong_type', detail: 'must be array or string' })
+    }
+  }
+  // year — optional integer 1900..2030
+  if (body.year !== undefined && body.year !== null) {
+    if (!_isInteger(body.year)) {
+      errors.push({ field: 'year', code: 'wrong_type', detail: 'must be integer' })
+    } else if (body.year < 1900 || body.year > 2030) {
+      errors.push({ field: 'year', code: 'out_of_range', detail: 'must be in [1900, 2030]' })
+    }
+  }
+  // first_affiliation — optional string<=500
+  if (body.first_affiliation !== undefined && body.first_affiliation !== null) {
+    if (!_isString(body.first_affiliation)) {
+      errors.push({ field: 'first_affiliation', code: 'wrong_type', detail: 'must be string' })
+    } else if (body.first_affiliation.length > 500) {
+      errors.push({ field: 'first_affiliation', code: 'too_long', detail: 'max length 500' })
+    }
+  }
+  // target_journal — optional object
+  if (body.target_journal !== undefined && body.target_journal !== null) {
+    if (!_isPlainObject(body.target_journal)) {
+      errors.push({ field: 'target_journal', code: 'wrong_type', detail: 'must be object' })
+    } else {
+      const tj = body.target_journal
+      if (tj.issn !== undefined && tj.issn !== null && !_isString(tj.issn)) {
+        errors.push({ field: 'target_journal.issn', code: 'wrong_type', detail: 'must be string' })
+      }
+      if (tj.name !== undefined && tj.name !== null) {
+        if (!_isString(tj.name)) {
+          errors.push({ field: 'target_journal.name', code: 'wrong_type', detail: 'must be string' })
+        } else if (tj.name.length > 200) {
+          errors.push({ field: 'target_journal.name', code: 'too_long', detail: 'max length 200' })
+        }
+      }
+      if (tj.jif !== undefined && tj.jif !== null && !_isFiniteNumber(tj.jif)) {
+        errors.push({ field: 'target_journal.jif', code: 'wrong_type', detail: 'must be number' })
+      }
+    }
+  }
+  // author_features — optional object; all fields number; team_size_with_id integer 0..1000
+  if (body.author_features !== undefined && body.author_features !== null) {
+    if (!_isPlainObject(body.author_features)) {
+      errors.push({ field: 'author_features', code: 'wrong_type', detail: 'must be object' })
+    } else {
+      for (const [k, v] of Object.entries(body.author_features)) {
+        if (v === undefined || v === null) continue
+        if (k === 'team_size_with_id') {
+          if (!_isInteger(v)) {
+            errors.push({ field: `author_features.${k}`, code: 'wrong_type', detail: 'must be integer' })
+          } else if (v < 0 || v > 1000) {
+            errors.push({ field: `author_features.${k}`, code: 'out_of_range', detail: 'must be in [0, 1000]' })
+          }
+        } else if (!_isFiniteNumber(v)) {
+          errors.push({ field: `author_features.${k}`, code: 'wrong_type', detail: 'must be number' })
+        }
+      }
+    }
+  }
+  return { ok: errors.length === 0, errors }
+}
+
 function detectFailureReason(failedItems) {
   for (const it of failedItems) {
     const msg = String(it?._error_detail || it?.rationale_short || '')
@@ -277,6 +405,14 @@ export default async function handler(req, res) {
       return bad(res, 408, 'request_timeout', undefined, requestId)
     }
     return bad(res, 400, 'invalid_json', String(e.message || e), requestId)
+  }
+
+  // Structural schema validation (additive — runs BEFORE the legacy required
+  // checks below so out-of-range optional fields surface as invalid_request
+  // rather than silently flowing into the extractor).
+  const _v = validateForecastBody(body)
+  if (!_v.ok) {
+    return bad(res, 400, 'invalid_request', { errors: _v.errors }, requestId)
   }
 
   const {
