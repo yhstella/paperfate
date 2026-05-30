@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
+import { t } from '../lib/i18n.js'
 import {
   getForecasts,
   clearAll,
@@ -223,22 +224,22 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
       className="fixed inset-0 z-50 flex"
       role="dialog"
       aria-modal="true"
-      aria-label="Forecast history"
+      aria-label={t('history.open')}
     >
       <button
         type="button"
         onClick={onClose}
-        aria-label="Close forecast history"
+        aria-label={t('history.close')}
         className="flex-1 bg-black/40 backdrop-blur-sm"
       />
       <aside
         role="region"
-        aria-label="Forecast history"
+        aria-label={t('history.open')}
         className="w-full max-w-md h-full overflow-y-auto bg-ink-950 border-l border-white/10 shadow-xl flex flex-col"
       >
         <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-ink-950/95 backdrop-blur px-4 py-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-100">Forecast history</h3>
+            <h3 className="text-sm font-semibold text-slate-100">{t('history.open')}</h3>
             <p className="text-[11px] text-slate-500">
               Last {entries.length || 0} run{entries.length === 1 ? '' : 's'} on this device
             </p>
@@ -248,20 +249,20 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
               <button
                 type="button"
                 onClick={handleExport}
-                aria-label="Export forecast history as JSON"
-                title="Download history as JSON"
+                aria-label={t('history.exported')}
+                title={t('history.exported')}
                 className="text-[11px] text-slate-300 hover:text-slate-100 px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
               >
-                Export JSON
+                {t('history.exported')}
               </button>
             )}
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={t('common.close')}
               className="text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
             >
-              Close
+              {t('common.close')}
             </button>
           </div>
         </header>
@@ -269,7 +270,7 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
         <div className="flex-1 px-4 py-3">
           {!hasEntries ? (
             <div className="rounded-md border border-white/5 bg-ink-900/60 p-4 text-xs text-slate-400">
-              No forecasts yet. Successful runs will appear here so you can revisit them.
+              {t('history.no_entries')}
             </div>
           ) : (
             <ul className="space-y-2">
@@ -288,8 +289,8 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                             type="button"
                             onClick={() => handleToggleFavorite(entry)}
                             aria-pressed={isFav}
-                            aria-label={isFav ? 'Unfavorite this forecast' : 'Favorite this forecast'}
-                            title={isFav ? 'Favorited' : 'Mark as favorite'}
+                            aria-label={isFav ? t('history.favorite_off') : t('history.favorite_on')}
+                            title={isFav ? t('history.favorite_off') : t('history.favorite_on')}
                             className={`shrink-0 mt-0.5 text-base leading-none px-1 rounded hover:bg-white/5 transition-colors ${
                               isFav ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'
                             }`}
@@ -299,7 +300,7 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                           <button
                             type="button"
                             onClick={() => handleRestore(entry)}
-                            aria-label={`Restore forecast: ${entry.title || 'Untitled'}`}
+                            aria-label={`${t('history.restore')}: ${entry.title || 'Untitled'}`}
                             className="block min-w-0 flex-1 text-left"
                           >
                             <div className="text-sm text-slate-100 truncate">
@@ -337,7 +338,7 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                           <button
                             type="button"
                             onClick={() => handleRemoveTag(entry, tag)}
-                            aria-label={`Remove tag ${tag}`}
+                            aria-label={`${t('history.remove_tag')}: ${tag}`}
                             className="text-slate-500 hover:text-rose-300 leading-none px-1"
                           >
                             <span aria-hidden="true">{'×'}</span>
@@ -362,8 +363,8 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                               }
                             }}
                             maxLength={TAG_MAX_LEN}
-                            placeholder="tag"
-                            aria-label="New tag"
+                            placeholder={t('history.tag_placeholder')}
+                            aria-label={t('history.add_tag')}
                             className="w-24 rounded-full border border-fate-400/30 bg-ink-950 text-[10px] text-slate-100 px-2 py-0.5 focus:outline-none focus:border-fate-400/60"
                           />
                         </form>
@@ -372,8 +373,8 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                           type="button"
                           onClick={() => openTagDraft(entry)}
                           disabled={tagFull}
-                          aria-label={tagFull ? 'Tag limit reached' : 'Add a tag'}
-                          title={tagFull ? `Up to ${MAX_TAGS_PER_ENTRY} tags` : 'Add tag'}
+                          aria-label={t('history.add_tag')}
+                          title={t('history.add_tag')}
                           className={`inline-flex items-center gap-0.5 rounded-full border border-dashed text-[10px] px-2 py-0.5 transition-colors ${
                             tagFull
                               ? 'border-white/5 text-slate-600 cursor-not-allowed'
@@ -381,7 +382,7 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                           }`}
                         >
                           <span aria-hidden="true">+</span>
-                          <span>tag</span>
+                          <span>{t('history.add_tag')}</span>
                         </button>
                       )}
                     </div>
@@ -391,10 +392,10 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                         <button
                           type="button"
                           onClick={() => handleCopy(entry)}
-                          aria-label="Copy share link for this forecast"
+                          aria-label={t('history.copy_link')}
                           className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
                         >
-                          {copiedId === entry.id ? 'Copied!' : 'Copy share link'}
+                          {copiedId === entry.id ? t('history.copied') : t('history.copy_link')}
                         </button>
                         <button
                           type="button"
@@ -428,7 +429,7 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                           </svg>
                           <span>
                             {sharedId === entry.id
-                              ? (sharedMethod === 'clipboard' ? 'Copied!' : 'Shared!')
+                              ? (sharedMethod === 'clipboard' ? t('history.copied') : 'Shared!')
                               : 'Share'}
                           </span>
                         </button>
@@ -436,10 +437,10 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                       <button
                         type="button"
                         onClick={() => handleRestore(entry)}
-                        aria-label="Restore this forecast"
+                        aria-label={t('history.restore')}
                         className="text-[11px] text-fate-300 hover:text-fate-200 px-2 py-1 rounded-md hover:bg-fate-400/10 transition-colors"
                       >
-                        Restore
+                        {t('history.restore')}
                       </button>
                     </div>
                   </div>
@@ -454,14 +455,14 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
             <button
               type="button"
               onClick={handleClear}
-              aria-label={confirmClear ? 'Confirm clear all forecast history' : 'Clear all forecast history'}
+              aria-label={confirmClear ? t('history.clear_confirm') : t('history.clear_all')}
               className={`w-full text-xs px-3 py-2 rounded-md border transition-colors ${
                 confirmClear
                   ? 'border-rose-400/40 text-rose-200 bg-rose-400/[0.08] hover:bg-rose-400/[0.14]'
                   : 'border-white/10 text-slate-400 hover:text-slate-200 hover:border-white/20'
               }`}
             >
-              {confirmClear ? 'Click again to confirm — clears all history' : 'Clear all'}
+              {confirmClear ? t('history.clear_confirm') : t('history.clear_all')}
             </button>
           </footer>
         )}

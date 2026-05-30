@@ -1,6 +1,51 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
 import { t } from '../lib/i18n.js'
+
+// Defer below-the-fold sections until after first paint so the hero
+// (title + score dial + 6-tile grid) hits the screen with less inline JSX
+// work on the critical path. Falls back to immediate render when
+// requestAnimationFrame is unavailable (SSR / older runtimes).
+function useDeferredRender() {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    const schedule = (cb) => {
+      if (typeof window === 'undefined') { cb(); return () => {} }
+      if (typeof window.requestAnimationFrame === 'function') {
+        // double-rAF: ensure the first paint has actually flushed
+        const id1 = window.requestAnimationFrame(() => {
+          const id2 = window.requestAnimationFrame(() => { if (!cancelled) cb() })
+          return () => window.cancelAnimationFrame(id2)
+        })
+        return () => window.cancelAnimationFrame(id1)
+      }
+      const tid = setTimeout(cb, 0)
+      return () => clearTimeout(tid)
+    }
+    const cleanup = schedule(() => setReady(true))
+    return () => { cancelled = true; if (typeof cleanup === 'function') cleanup() }
+  }, [])
+  return ready
+}
+
+// Tiny shimmer block used while deferred sections wait for the first
+// paint to flush. Keeps layout stable so CLS stays at 0.
+function SectionSkeleton({ rows = 2, label }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label || 'Loading section'}
+      className="mt-6 rounded-xl border border-white/5 bg-ink-900/40 p-4"
+    >
+      <div className="h-3 w-24 animate-pulse rounded bg-white/5" />
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="mt-3 h-3 w-full animate-pulse rounded bg-white/[0.04]" />
+      ))}
+    </div>
+  )
+}
 
 export default function ResultPanel({ result, input }) {
   const { tier, deskReject, timeline, citation, score, weakness, suggestions, similars, journey, targetJournal, referencesSummary, confidence, fatecoreMeta, jointCounterfactual, manuscriptJifPoint, authorFeatures, adjustedJif } = result
@@ -30,6 +75,13 @@ export default function ResultPanel({ result, input }) {
   const hasJourney = Array.isArray(journey) && journey.length > 0
   const hasSimilar = Array.isArray(similars) && similars.length > 0
   const hasRefs = !!(referencesSummary && referencesSummary.n_resolved > 0)
+
+  // Defer the heavy/long sections (journey list, adjusted-JIF visualizer,
+  // author profile, joint counterfactual, target journal card, references
+  // summary, suggestions list, similar-papers table) until after first
+  // paint. The hero + 6-tile grid renders synchronously so the user sees
+  // the headline forecast immediately.
+  const heavyReady = useDeferredRender()
 
   // 'result_render' — fires once per mount / per props identity change.
   useEffect(() => {
@@ -191,7 +243,10 @@ export default function ResultPanel({ result, input }) {
         </Card>
       </div>
 
-      {journey && journey.length > 0 && (
+      {journey && journey.length > 0 && !heavyReady && (
+        <SectionSkeleton rows={3} label={t('result.journey_title')} />
+      )}
+      {journey && journey.length > 0 && heavyReady && (
         <section className="mt-8" aria-labelledby="journey-heading">
           <h3 id="journey-heading" className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">
             {t('result.journey_title')}
@@ -242,7 +297,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
-      {adjustedJif && adjustedJif.is_adjusted && (
+      {adjustedJif && adjustedJif.is_adjusted && !heavyReady && (
+        <SectionSkeleton rows={2} label="Adjusted JIF estimate" />
+      )}
+      {adjustedJif && adjustedJif.is_adjusted && heavyReady && (
         <section className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Adjusted JIF estimate</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
@@ -258,7 +316,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
-      {authorFeatures && authorFeatures.team_size_with_id > 0 && (
+      {authorFeatures && authorFeatures.team_size_with_id > 0 && !heavyReady && (
+        <SectionSkeleton rows={2} label="Author profile" />
+      )}
+      {authorFeatures && authorFeatures.team_size_with_id > 0 && heavyReady && (
         <section className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Author profile</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
@@ -284,7 +345,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
-      {!hideCounterfactuals && jointCounterfactual && jointCounterfactual.items_count >= 2 && (
+      {!hideCounterfactuals && jointCounterfactual && jointCounterfactual.items_count >= 2 && !heavyReady && (
+        <SectionSkeleton rows={2} label="Joint counterfactual" />
+      )}
+      {!hideCounterfactuals && jointCounterfactual && jointCounterfactual.items_count >= 2 && heavyReady && (
         <section className="mt-4 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you fix all top {jointCounterfactual.items_count}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
@@ -306,7 +370,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
-      {targetJournal && (
+      {targetJournal && !heavyReady && (
+        <SectionSkeleton rows={2} label={t('result.target_journal_title')} />
+      )}
+      {targetJournal && heavyReady && (
         <section className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{t('result.target_journal_title')}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
@@ -328,7 +395,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
-      {referencesSummary && referencesSummary.n_resolved > 0 && (
+      {referencesSummary && referencesSummary.n_resolved > 0 && !heavyReady && (
+        <SectionSkeleton rows={3} label={t('result.bibliography_title')} />
+      )}
+      {referencesSummary && referencesSummary.n_resolved > 0 && heavyReady && (
         <section className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{t('result.bibliography_title')}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
@@ -381,6 +451,10 @@ export default function ResultPanel({ result, input }) {
         </section>
       )}
 
+      {!heavyReady && (
+        <SectionSkeleton rows={4} label={`${t('result.suggestions_title')} / ${t('result.similar_papers_title')}`} />
+      )}
+      {heavyReady && (
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         {suggestions && suggestions.length > 0 && (
           <section className="lg:col-span-3">
@@ -419,6 +493,7 @@ export default function ResultPanel({ result, input }) {
           </ul>
         </section>
       </div>
+      )}
 
       <div className="mt-6 flex flex-wrap items-center gap-3 text-xs text-slate-500">
         <span>ⓘ Probabilistic forecast — actual outcomes depend on reviewers, editors, and timing.</span>
