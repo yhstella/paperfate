@@ -11,6 +11,7 @@ import {
   exportAsJson,
 } from '../lib/forecastHistory.js'
 import { shareForecast, canShareForecast } from '../lib/shareForecast.js'
+import ForecastCompare from './ForecastCompare.jsx'
 
 const MAX_TAGS_PER_ENTRY = 5
 const TAG_MAX_LEN = 32
@@ -53,6 +54,13 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
   const tagInputRef = useRef(null)
   const shareAvailable = useMemo(() => canShareForecast(), [])
 
+  // Diff-against multi-select. Holds at most 2 entry ids; a third click
+  // drops the oldest selection so the user can pivot without manually
+  // unchecking. compareEntries (non-null when modal open) carries the
+  // pair into <ForecastCompare>.
+  const [selectedIds, setSelectedIds] = useState([])
+  const [compareEntries, setCompareEntries] = useState(null)
+
   function reload() {
     try {
       setEntries(getForecasts())
@@ -73,6 +81,8 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
     setSharedMethod(null)
     setTagDraftId(null)
     setTagDraft('')
+    setSelectedIds([])
+    setCompareEntries(null)
   }, [open])
 
   // When a tag input opens, focus it so the user can type immediately.
@@ -192,6 +202,29 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
     reload()
   }
 
+  function toggleCompareSelect(entry) {
+    if (!entry) return
+    setSelectedIds(prev => {
+      const has = prev.includes(entry.id)
+      if (has) return prev.filter(id => id !== entry.id)
+      // Cap at 2 — drop the oldest selection (FIFO) so the user can pivot.
+      const next = prev.length >= 2 ? [...prev.slice(1), entry.id] : [...prev, entry.id]
+      return next
+    })
+  }
+
+  function openCompare() {
+    if (selectedIds.length !== 2) return
+    const a = entries.find(e => e.id === selectedIds[0]) || null
+    const b = entries.find(e => e.id === selectedIds[1]) || null
+    if (!a || !b) return
+    setCompareEntries({ a, b })
+  }
+
+  function closeCompare() {
+    setCompareEntries(null)
+  }
+
   function handleExport() {
     if (typeof window === 'undefined') return
     let json = ''
@@ -279,12 +312,29 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                 const isFav = entry.favorite === true
                 const isDraftingTag = tagDraftId === entry.id
                 const tagFull = tags.length >= MAX_TAGS_PER_ENTRY
+                const isCompareSelected = selectedIds.includes(entry.id)
                 return (
                 <li key={entry.id}>
-                  <div className="rounded-md border border-white/10 bg-ink-900/60 p-3 hover:border-fate-400/30 transition-colors">
+                  <div className={`rounded-md border bg-ink-900/60 p-3 transition-colors ${
+                    isCompareSelected
+                      ? 'border-fate-400/60 ring-1 ring-fate-400/20'
+                      : 'border-white/10 hover:border-fate-400/30'
+                  }`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start gap-2">
+                          <label
+                            className="shrink-0 mt-1 inline-flex items-center cursor-pointer"
+                            title="Diff against"
+                            aria-label={`Diff against: ${entry.title || 'Untitled'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isCompareSelected}
+                              onChange={() => toggleCompareSelect(entry)}
+                              className="h-3.5 w-3.5 rounded border-white/20 bg-ink-950 text-fate-400 focus:ring-fate-500 focus:ring-offset-0 focus:ring-1"
+                            />
+                          </label>
                           <button
                             type="button"
                             onClick={() => handleToggleFavorite(entry)}
@@ -451,7 +501,34 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
         </div>
 
         {hasEntries && (
-          <footer className="sticky bottom-0 border-t border-white/10 bg-ink-950/95 backdrop-blur px-4 py-3">
+          <footer className="sticky bottom-0 border-t border-white/10 bg-ink-950/95 backdrop-blur px-4 py-3 space-y-2">
+            {selectedIds.length > 0 && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-400">
+                  {selectedIds.length === 1
+                    ? '1 selected — pick one more to compare'
+                    : '2 selected'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  aria-label="Clear compare selection"
+                  className="text-[11px] text-slate-500 hover:text-slate-300 px-2 py-1 rounded-md hover:bg-white/5 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+            {selectedIds.length === 2 && (
+              <button
+                type="button"
+                onClick={openCompare}
+                aria-label="Compare 2 selected forecasts"
+                className="w-full text-xs px-3 py-2 rounded-md border border-fate-400/40 text-fate-200 bg-fate-400/[0.08] hover:bg-fate-400/[0.14] transition-colors"
+              >
+                Compare 2 selected
+              </button>
+            )}
             <button
               type="button"
               onClick={handleClear}
@@ -467,6 +544,12 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
           </footer>
         )}
       </aside>
+      <ForecastCompare
+        open={!!compareEntries}
+        entryA={compareEntries ? compareEntries.a : null}
+        entryB={compareEntries ? compareEntries.b : null}
+        onClose={closeCompare}
+      />
     </div>
   )
 }
