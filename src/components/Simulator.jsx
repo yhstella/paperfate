@@ -313,6 +313,44 @@ export default function Simulator() {
     return () => clearTimeout(id)
   }, [draftNoteVisible])
 
+  // Round 10 W-V: Cmd+K Command Palette bridge. The global palette dispatches
+  // window events rather than holding a ref to this component, so we register
+  // listeners for the two simulator-scoped commands and act on them here.
+  // - 'paperfate:clear-simulator-draft' wipes the form + localStorage draft.
+  // - 'paperfate:open-history' opens the ForecastHistory side panel.
+  // Both fire dedicated telemetry events so we can measure palette adoption.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    function handlePaletteClear() {
+      clearDraft()
+      setTitle('')
+      setText('')
+      setAuthorsInput('')
+      setReferencesInput('')
+      setTargetJournalInput('')
+      setOverrides({})
+      setAuthorsAutoDetected(false)
+      setReferencesAutoDetected(false)
+      setDraftRestoredAt(null)
+      setDraftNoteVisible(false)
+      setInputMode('abstract')
+      setStatus('idle')
+      setResult(null)
+      setPendingConfirm(null)
+      trackEvent('sim_palette_clear', {})
+    }
+    function handlePaletteOpenHistory() {
+      setHistoryOpen(true)
+      trackEvent('sim_palette_open_history', {})
+    }
+    window.addEventListener('paperfate:clear-simulator-draft', handlePaletteClear)
+    window.addEventListener('paperfate:open-history', handlePaletteOpenHistory)
+    return () => {
+      window.removeEventListener('paperfate:clear-simulator-draft', handlePaletteClear)
+      window.removeEventListener('paperfate:open-history', handlePaletteOpenHistory)
+    }
+  }, [])
+
   // Debounced draft save on any input change. We only persist after the
   // initial hydration pass to avoid clobbering a freshly-loaded draft with
   // the empty initial state.

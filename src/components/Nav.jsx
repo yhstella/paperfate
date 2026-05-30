@@ -122,6 +122,25 @@ function PrivacyMenu() {
     }
   }, [])
 
+  // Allow the Cmd+K palette (or any caller) to programmatically open
+  // the privacy popover by dispatching 'paperfate:open-privacy'.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onOpenPrivacy = () => {
+      setStatus(getTelemetryStatus())
+      setOpen(true)
+      try {
+        trackEvent('nav_palette_open_privacy')
+      } catch (_) {
+        // telemetry should never break UI
+      }
+    }
+    window.addEventListener('paperfate:open-privacy', onOpenPrivacy)
+    return () => {
+      window.removeEventListener('paperfate:open-privacy', onOpenPrivacy)
+    }
+  }, [])
+
   useEffect(() => {
     if (!open) return undefined
     setStatus(getTelemetryStatus())

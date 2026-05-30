@@ -26,6 +26,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
+import { t, useLocale } from '../lib/i18n.js'
 
 const AUTO_REFRESH_MS = 60 * 1000
 
@@ -233,6 +234,21 @@ function deriveState(result) {
 }
 
 export default function Status() {
+  // Subscribe to locale changes so the page re-renders with the right
+  // strings when the user flips the language switcher in Nav.
+  useLocale()
+
+  // Localized badge labels — keyed by `state` returned from deriveState().
+  // 'green'/'amber'/'red' map to status.endpoint_ok/warn/fail respectively.
+  // 'pending' falls back to the existing English ellipsis since there is
+  // no key for it in the public status.* namespace.
+  const localizedBadgeLabel = (state) => {
+    if (state === 'green') return t('status.endpoint_ok')
+    if (state === 'amber') return t('status.endpoint_warn')
+    if (state === 'red')   return t('status.endpoint_fail')
+    return badgeLabel(state)
+  }
+
   // /api/status meta
   const [meta, setMeta] = useState(null)
   const [metaErr, setMetaErr] = useState(null)
@@ -251,6 +267,11 @@ export default function Status() {
   // Guard against state updates after unmount.
   const aliveRef = useRef(true)
   useEffect(() => () => { aliveRef.current = false }, [])
+
+  // Ref to the Refresh button so the 'paperfate:run-smoke' window event
+  // (dispatched by the Command Palette's 'Run smoke from Status' action,
+  // Round 10 W-II) can trigger the exact same click path a human would.
+  const refreshBtnRef = useRef(null)
 
   // Fire 'status_view' once on mount.
   useEffect(() => {
@@ -316,6 +337,26 @@ export default function Status() {
     return () => clearInterval(id)
   }, [autoRefresh, runAll])
 
+  // Listen for the Command Palette's 'Run smoke from Status' shortcut
+  // (Round 10 W-II dispatches 'paperfate:run-smoke' on window). We
+  // prefer to programmatically click the existing Refresh button so the
+  // user sees the same focus / press visual as a manual click; if the
+  // ref isn't attached yet for any reason, we fall back to runAll().
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = () => {
+      trackEvent('status_remote_run', { trigger: 'command-palette' })
+      const btn = refreshBtnRef.current
+      if (btn && typeof btn.click === 'function') {
+        btn.click()
+      } else {
+        runAll(false)
+      }
+    }
+    window.addEventListener('paperfate:run-smoke', handler)
+    return () => window.removeEventListener('paperfate:run-smoke', handler)
+  }, [runAll])
+
   const metaJsonPretty = useMemo(() => {
     if (metaPending && !meta) return null
     if (metaErr && !meta) return `// error: ${metaErr}`
@@ -343,12 +384,12 @@ export default function Status() {
   return (
     <section
       role="region"
-      aria-label="PaperFate status"
+      aria-label={t('status.page_title')}
       className="mx-auto max-w-6xl px-4 sm:px-6 py-8"
     >
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">System status</h2>
+          <h2 className="text-lg font-semibold text-slate-100">{t('status.page_title')}</h2>
           <p className="mt-1 text-xs text-slate-400">
             Live probes against every public PaperFate endpoint. Green is healthy,
             amber means the endpoint is up but running in degraded mode,
@@ -356,29 +397,30 @@ export default function Status() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className={`rounded border px-2 py-0.5 ${badgeClass('green')}`}>{counts.green} OK</span>
-          <span className={`rounded border px-2 py-0.5 ${badgeClass('amber')}`}>{counts.amber} degraded</span>
-          <span className={`rounded border px-2 py-0.5 ${badgeClass('red')}`}>{counts.red} down</span>
+          <span className={`rounded border px-2 py-0.5 ${badgeClass('green')}`}>{counts.green} {t('status.endpoint_ok')}</span>
+          <span className={`rounded border px-2 py-0.5 ${badgeClass('amber')}`}>{counts.amber} {t('status.endpoint_warn')}</span>
+          <span className={`rounded border px-2 py-0.5 ${badgeClass('red')}`}>{counts.red} {t('status.endpoint_fail')}</span>
           {counts.pending > 0 && (
             <span className={`rounded border px-2 py-0.5 ${badgeClass('pending')}`}>{counts.pending} checking</span>
           )}
           <button
+            ref={refreshBtnRef}
             type="button"
             onClick={() => runAll(false)}
             className="rounded-md bg-fate-600 px-3 py-1.5 font-medium text-white hover:bg-fate-500 focus:outline-none focus:ring-2 focus:ring-fate-400"
-            aria-label="Refresh status now"
+            aria-label={t('status.refresh')}
           >
-            Refresh
+            {t('status.refresh')}
           </button>
           <label className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-slate-300">
             <input
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              aria-label="Auto-refresh every 60 seconds"
+              aria-label={autoRefresh ? t('status.auto_refresh_on') : t('status.auto_refresh_off')}
               className="h-3.5 w-3.5"
             />
-            Auto-refresh (60s)
+            {autoRefresh ? t('status.auto_refresh_on') : t('status.auto_refresh_off')}
           </label>
         </div>
       </header>
@@ -439,9 +481,9 @@ export default function Status() {
                     </div>
                     <span
                       className={`shrink-0 rounded border px-2 py-0.5 ${badgeClass(state)}`}
-                      aria-label={`${p.label} ${badgeLabel(state)}`}
+                      aria-label={`${p.label} ${localizedBadgeLabel(state)}`}
                     >
-                      {badgeLabel(state)}
+                      {localizedBadgeLabel(state)}
                     </span>
                   </li>
                 )
