@@ -22,15 +22,36 @@ const Compare = lazy(() => import('./components/Compare.jsx'))
 // Status fires a handful of probe fetches on mount; lazy-load so users
 // who never click the tab don't pay the network cost.
 const Status = lazy(() => import('./components/Status.jsx'))
+// Admin is an operator-only panel hidden behind the
+// `paperfate.admin_mode` localStorage flag — see `adminMode` below. We
+// lazy-load it for the same reason as Status: regular users never reach
+// for this tab so they shouldn't pay for it on first load.
+const Admin = lazy(() => import('./components/Admin.jsx'))
 
-const TABS = [
+const BASE_TABS = [
   { key: 'simulator', label: 'Simulator' },
   { key: 'compare',   label: 'Compare venues' },
   { key: 'status',    label: 'Status' },
 ]
+const ADMIN_TAB = { key: 'admin', label: 'Admin' }
+
+// Read the admin-mode flag once at module evaluation time. Operators
+// flip it in devtools then reload, so we don't bother subscribing to
+// storage events — a reload is the documented enablement path.
+function readAdminMode() {
+  try {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem('paperfate.admin_mode') === '1'
+  } catch { return false }
+}
 
 export default function App() {
   const [tab, setTab] = useState('simulator')
+  // Admin mode is evaluated once on first render. We deliberately don't
+  // subscribe to changes — flipping the flag requires a page reload, which
+  // also gives the lazy Admin chunk a clean fetch.
+  const [adminMode] = useState(() => readAdminMode())
+  const TABS = useMemo(() => (adminMode ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS), [adminMode])
   const activeLabel = (TABS.find(t => t.key === tab) || TABS[0]).label
 
   // Register the global Cmd/Ctrl+K shortcut once on mount. The handler
@@ -230,6 +251,19 @@ export default function App() {
                 }
               >
                 <Status />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {tab === 'admin' && adminMode && (
+            <ErrorBoundary name="Admin">
+              <Suspense
+                fallback={
+                  <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 text-sm text-slate-400">
+                    Loading admin…
+                  </div>
+                }
+              >
+                <Admin />
               </Suspense>
             </ErrorBoundary>
           )}
