@@ -12,10 +12,14 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 // Code-split: Compare is a heavier sibling of Simulator and most first
 // loads land on Simulator. Lazy-load it so initial JS stays lean.
 const Compare = lazy(() => import('./components/Compare.jsx'))
+// Status fires a handful of probe fetches on mount; lazy-load so users
+// who never click the tab don't pay the network cost.
+const Status = lazy(() => import('./components/Status.jsx'))
 
 const TABS = [
   { key: 'simulator', label: 'Simulator' },
   { key: 'compare',   label: 'Compare venues' },
+  { key: 'status',    label: 'Status' },
 ]
 
 export default function App() {
@@ -66,6 +70,19 @@ export default function App() {
                 }
               >
                 <Compare />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {tab === 'status' && (
+            <ErrorBoundary name="Status">
+              <Suspense
+                fallback={
+                  <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 text-sm text-slate-400">
+                    Loading status…
+                  </div>
+                }
+              >
+                <Status />
               </Suspense>
             </ErrorBoundary>
           )}
