@@ -1,0 +1,1619 @@
+openapi: 3.1.0
+info:
+  title: PaperFate API
+  version: 0.4.0
+  summary: Pre-submission manuscript forecasting and journal intelligence.
+  description: |
+    Public HTTP API for the PaperFate platform (https://paperfate.com).
+
+    All endpoints run as Vercel Node serverless functions
+    (`runtime: "nodejs"`). POST endpoints accept and return
+    `application/json`. GET endpoints take query parameters.
+
+    ## Conventions
+
+    - Base URL: `https://paperfate.com` in production. For local Vite dev,
+      `npm run dev` does **not** mount the API — use `vercel dev` or hit
+      the production base URL.
+    - CORS: `Access-Control-Allow-Origin` is whitelisted via the
+      `PAPERFATE_ALLOWED_ORIGINS` env var (default
+      `https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180`).
+      Preflight `OPTIONS` returns `204` with a `Vary: Origin` header.
+    - Rate limiting: no application-level limiter; Vercel platform limits
+      apply. Stable lookups (journal info / search) set
+      `Cache-Control: s-maxage=86400, stale-while-revalidate=604800`.
+    - Errors: JSON body `{ error, detail?, request_id? }`.
+    - request_id: every `/api/forecast` and `/api/abstract-quality`
+      response carries a UUID for log correlation; surface it back to
+      users when filing support.
+    - Server version: forecast server is `0.4.0`; abstract-quality is
+      `0.3.1`. Returned in the response body where applicable.
+  contact:
+    name: PaperFate Maintainers
+    url: https://paperfate.com
+    email: support@paperfate.example
+  license:
+    name: Proprietary
+servers:
+  - url: https://paperfate.com
+    description: Production
+tags:
+  - name: forecast
+    description: Manuscript scoring and FateCore inference.
+  - name: rubric
+    description: Pure Q100 abstract rubric (no FateCore).
+  - name: discovery
+    description: Similar-paper retrieval over OpenAlex.
+  - name: journals
+    description: Journal lookup, autocomplete, and batch comparison.
+  - name: references
+    description: Reference-list resolve via OpenAlex.
+  - name: authors
+    description: Author h-index rollup via OpenAlex.
+  - name: extras
+    description: paper_extras_v2 single-DOI subset lookup.
+  - name: ops
+    description: Status and telemetry sinks.
+paths:
+  /api/forecast:
+    post:
+      tags: [forecast]
+      summary: End-to-end Q500 scorer + FateCore inference + journey
+      description: |
+        Full manuscript forecasting pipeline. Accepts a partial or
+        complete manuscript, runs the Q500 (or Q100, with `mode='auto'`
+        and short body) rubric extractor, returns FateCore JIF / desk-
+        reject / review-time / 5-year-citation forecasts, target-journal
+        journey, and counterfactual suggestions.
+
+        Latency budget: up to 300 s (`maxDuration: 300`). Typical Q500
+        with paid Gemini tier ~110 s; Q100 short-body path ~15-25 s.
+        Body cap: 256 KB; stream read timeout 10 s.
+      operationId: postForecast
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForecastRequest'
+            examples:
+              q100Short:
+                summary: Q100 short-body forecast
+                value:
+                  title: Empagliflozin and Cardiovascular Outcomes in T2D
+                  abstract: We conducted a randomized double-blind trial of empagliflozin in patients with type 2 diabetes at high cardiovascular risk. Over a median 3.1 years of follow-up, the primary composite outcome of cardiovascular death, non-fatal myocardial infarction, or non-fatal stroke occurred in 10.5 percent of empagliflozin recipients versus 12.1 percent of placebo recipients, a statistically significant reduction.
+                  mode: Q100
+      responses:
+        '200':
+          description: Forecast pipeline completed.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '408':
+          $ref: '#/components/responses/RequestTimeout'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    options:
+      tags: [forecast]
+      summary: CORS preflight
+      operationId: optionsForecast
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/abstract-quality:
+    post:
+      tags: [rubric]
+      summary: Pure Q100 abstract-only rubric scorer
+      description: |
+        Forces `mode='Q100'` against the abstract+title only. Strips
+        FateCore/journey/suggestions; returns the rubric rollup, items,
+        and `server_version: '0.3.1'`.
+
+        Latency budget: 60 s.
+      operationId: postAbstractQuality
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbstractQualityRequest'
+            examples:
+              minimal:
+                value:
+                  title: Empagliflozin in T2D
+                  abstract: We randomly assigned patients with T2D to empagliflozin or placebo and followed them for a median of 3.1 years. The primary outcome of cardiovascular death, non-fatal myocardial infarction, or non-fatal stroke was reduced in the empagliflozin arm versus placebo. Adverse events were balanced between groups.
+                  article_type: clinical_trial
+      responses:
+        '200':
+          description: Q100 rubric scored.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbstractQualityResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    options:
+      tags: [rubric]
+      summary: CORS preflight
+      operationId: optionsAbstractQuality
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/similar:
+    post:
+      tags: [discovery]
+      summary: OpenAlex similar-paper retrieval
+      description: |
+        Parallel title + abstract searches against OpenAlex. Returns up
+        to 5 candidates with ISSN -> JIF joins from the on-deploy
+        800-journal shortlist. Latency budget 30 s; handler-internal
+        deadline 22 s.
+      operationId: postSimilar
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimilarRequest'
+            examples:
+              default:
+                value:
+                  title: Empagliflozin and Cardiovascular Outcomes
+                  abstract: We conducted a multinational randomized double-blind trial of empagliflozin in patients with type 2 diabetes and established cardiovascular disease. The primary composite outcome was significantly reduced versus placebo over a median 3.1 years of follow-up.
+      responses:
+        '200':
+          description: Up to 5 similar papers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          description: OpenAlex search failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                upstream:
+                  value:
+                    error: openalex_search_failed
+    options:
+      tags: [discovery]
+      summary: CORS preflight
+      operationId: optionsSimilar
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/journal-info:
+    get:
+      tags: [journals]
+      summary: Single-journal lookup
+      description: |
+        Resolve a single journal against the 800-journal shortlist by
+        ISSN or name. Match priority: ISSN exact, name exact, name
+        startsWith (sorted by JIF desc, match_score 700), name substring
+        of >= 6 chars (sorted by JIF desc, match_score 500).
+
+        Latency budget 10 s.
+        Cache-Control: `s-maxage=86400, stale-while-revalidate=604800`.
+      operationId: getJournalInfo
+      parameters:
+        - name: issn
+          in: query
+          description: ISSN, hyphen-tolerant, case-insensitive.
+          required: false
+          schema:
+            type: string
+            example: 0028-4793
+        - name: name
+          in: query
+          description: Journal display name (case-insensitive).
+          required: false
+          schema:
+            type: string
+            example: Lancet
+        - $ref: '#/components/parameters/OriginHeader'
+      responses:
+        '200':
+          description: Journal resolved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalInfoResponse'
+        '404':
+          description: No journal matched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                    error: journal_not_found
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    options:
+      tags: [journals]
+      summary: CORS preflight
+      operationId: optionsJournalInfo
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/journals-search:
+    get:
+      tags: [journals]
+      summary: In-memory fuzzy journal autocomplete
+      description: |
+        Returns up to 20 candidates. Scoring: ISSN exact 1000, name
+        exact 900, name startsWith 700, name substring 500, category
+        substring 100, tie-break adds up to +199 by JIF.
+
+        When `tier` is not specified, the top 7 raw-score matches are
+        kept and remaining slots are reserved for Q2/Q3 journals
+        scoring above the top-7 floor (tier blending).
+
+        Latency budget 10 s.
+        Cache-Control: `s-maxage=86400, stale-while-revalidate=604800`.
+      operationId: getJournalsSearch
+      parameters:
+        - name: q
+          in: query
+          description: Query string, required, >= 2 chars.
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            example: lancet
+        - name: limit
+          in: query
+          description: Result cap, clamped to 1-20.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+        - name: tier
+          in: query
+          description: Optional uppercase tier filter; disables tier blending.
+          required: false
+          schema:
+            type: string
+            enum: [TOP, Q1, Q2, Q3, Q4]
+        - $ref: '#/components/parameters/OriginHeader'
+      responses:
+        '200':
+          description: Up to `limit` ranked candidates.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalsSearchResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    options:
+      tags: [journals]
+      summary: CORS preflight
+      operationId: optionsJournalsSearch
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/journal-compare:
+    post:
+      tags: [journals]
+      summary: Batch-resolve up to 5 target journals
+      description: |
+        Resolves up to 5 journals in a single request using the same
+        priority as `/journal-info` (ISSN exact, name exact, name
+        substring). Unresolved entries are silently dropped.
+        Latency budget 10 s.
+      operationId: postJournalCompare
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalCompareRequest'
+            examples:
+              mixed:
+                value:
+                  issns:
+                    - 0028-4793
+                    - 0140-6736
+                  names:
+                    - JAMA
+      responses:
+        '200':
+          description: Resolved journal objects.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalCompareResponse'
+        '400':
+          description: Bad request (no targets, too many targets, or invalid JSON).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noTargets:
+                  value:
+                    error: no_targets
+                tooMany:
+                  value:
+                    error: too_many_targets
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    options:
+      tags: [journals]
+      summary: CORS preflight
+      operationId: optionsJournalCompare
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/references:
+    post:
+      tags: [references]
+      summary: DOI batch resolve via OpenAlex
+      description: |
+        Resolves up to 50 DOIs in parallel (pool size 6, per-DOI timeout
+        8 s with one 429 retry). Joins ISSN-L -> JIF from the
+        shortlist. Publisher prefixes (NEJM, Lancet, JAMA, Nature,
+        Science) are sanity-checked; mismatched venues are nulled and
+        flagged via `warning: 'doi_metadata_mismatch'`.
+        Latency budget 60 s.
+      operationId: postReferences
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReferencesRequest'
+            examples:
+              twoDois:
+                value:
+                  dois:
+                    - 10.1056/nejmoa1504720
+                    - 10.1016/s0140-6736(15)60291-4
+      responses:
+        '200':
+          description: Resolved references + summary stats.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferencesResponse'
+        '400':
+          description: Bad request (no valid DOIs, too many DOIs, invalid JSON).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noValid:
+                  value:
+                    error: no_valid_dois
+                tooMany:
+                  value:
+                    error: too_many_dois
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    options:
+      tags: [references]
+      summary: CORS preflight
+      operationId: optionsReferences
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/author-features:
+    post:
+      tags: [authors]
+      summary: Author h-index rollup via OpenAlex
+      description: |
+        Resolves up to 25 author names through OpenAlex `/authors?search=`
+        (top result by relevance) and aggregates them into the FateCore
+        author-feature vector. Latency budget 30 s; pool size 5, per-
+        author timeout 8 s.
+      operationId: postAuthorFeatures
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorFeaturesRequest'
+            examples:
+              team:
+                value:
+                  authors:
+                    - Bernard Zinman
+                    - Christoph Wanner
+                    - Silvio Inzucchi
+      responses:
+        '200':
+          description: Resolved h-indexes + rollup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorFeaturesResponse'
+        '400':
+          description: Bad request (no authors, too many authors, invalid JSON).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noAuthors:
+                  value:
+                    error: no_authors
+                tooMany:
+                  value:
+                    error: too_many_authors
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    options:
+      tags: [authors]
+      summary: CORS preflight
+      operationId: optionsAuthorFeatures
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/extras-lookup:
+    post:
+      tags: [extras]
+      summary: Single-DOI paper_extras_v2 subset lookup
+      description: |
+        Resolves a single DOI against a bundled JSON subset of
+        recently-computed `paper_extras_v2` rows
+        (`weights/paper_extras_v2_subset.json`). When the subset file
+        is not deployed the endpoint returns 503 with a
+        machine-readable body — never 500. Latency budget 5 s.
+      operationId: postExtrasLookup
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtrasLookupRequest'
+            examples:
+              normalized:
+                value:
+                  doi: 10.1056/nejmoa1504720
+              withPrefix:
+                value:
+                  doi: https://doi.org/10.1056/nejmoa1504720
+      responses:
+        '200':
+          description: Lookup completed against the bundled subset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtrasLookupResponse'
+        '400':
+          description: Bad request (invalid JSON or missing DOI).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing:
+                  value:
+                    error: missing_doi
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          description: Subset JSON not deployed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtrasLookupUnavailable'
+    options:
+      tags: [extras]
+      summary: CORS preflight
+      operationId: optionsExtrasLookup
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/status:
+    get:
+      tags: [ops]
+      summary: Public status / server version
+      description: |
+        Reports server version, deploy commit (7-char Vercel SHA or
+        `'local'`), and the public-endpoint list. Stateless serverless
+        runtime — `runtime_seconds_uptime_estimate` is a sentinel
+        string, not a real counter. Latency budget 5 s.
+      operationId: getStatus
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      responses:
+        '200':
+          description: Service is up.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+    options:
+      tags: [ops]
+      summary: CORS preflight
+      operationId: optionsStatus
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+  /api/telemetry-beacon:
+    post:
+      tags: [ops]
+      summary: One-shot client telemetry beacon sink
+      description: |
+        Internal beacon sink for `src/lib/telemetry.js`. Events are
+        dumped to Vercel logs prefixed with `[telemetry]`. No DB, no
+        third-party analytics. Body cap 4 KB. Latency budget 5 s.
+        Typically dispatched via `navigator.sendBeacon` from the
+        browser.
+      operationId: postTelemetryBeacon
+      parameters:
+        - $ref: '#/components/parameters/OriginHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryBeaconRequest'
+            examples:
+              forecastView:
+                value:
+                  name: forecast_view
+                  props:
+                    tier: Q1
+                  ts: 1717000000000
+                  url: https://paperfate.com/simulator
+                  ua_summary: Chrome 124
+      responses:
+        '204':
+          description: Beacon accepted (empty body).
+        '400':
+          description: Bad request (invalid_json or invalid_shape).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalidShape:
+                  value:
+                    error: invalid_shape
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+    options:
+      tags: [ops]
+      summary: CORS preflight
+      operationId: optionsTelemetryBeacon
+      responses:
+        '204':
+          $ref: '#/components/responses/CorsPreflight'
+
+components:
+  parameters:
+    OriginHeader:
+      name: Origin
+      in: header
+      required: false
+      description: |
+        Browser-supplied request origin. Used by the CORS allowlist —
+        unrecognised origins fall back to the first allowed origin in
+        `PAPERFATE_ALLOWED_ORIGINS`.
+      schema:
+        type: string
+        example: https://paperfate.com
+
+  headers:
+    XRequestId:
+      description: UUID for log correlation. Mirrored in the JSON body as `request_id`.
+      schema:
+        type: string
+        format: uuid
+    XRateLimitLimit:
+      description: |
+        Reserved for future application-level limiter. Vercel platform
+        limits apply today; this header is documented for forward
+        compatibility.
+      schema:
+        type: integer
+        minimum: 0
+    XRateLimitRemaining:
+      description: Remaining requests in the current window (when present).
+      schema:
+        type: integer
+        minimum: 0
+    RetryAfter:
+      description: Seconds to wait before retrying (RFC 7231).
+      schema:
+        type: integer
+        minimum: 0
+    CacheControl:
+      description: Edge cache directives.
+      schema:
+        type: string
+        example: s-maxage=86400, stale-while-revalidate=604800
+
+  responses:
+    CorsPreflight:
+      description: |
+        CORS preflight accepted. The endpoint sets
+        `Access-Control-Allow-Origin` (from the configured allowlist),
+        `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers:
+        Content-Type`, and `Vary: Origin`.
+    BadRequest:
+      description: Validation failure. See `error` for the canonical code.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missingTitle:
+              value:
+                error: missing_or_short_title
+                request_id: 9f1c5d6e-1f8b-4a2b-9c3d-7e0a8b6c4d2f
+            invalidJson:
+              value:
+                error: invalid_json
+                detail: Unexpected token in JSON at position 17
+    MethodNotAllowed:
+      description: Non-allowed HTTP method.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            methodNotAllowed:
+              value:
+                error: method_not_allowed
+    RequestTimeout:
+      description: Request body stream exceeded 10 s.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            timeout:
+              value:
+                error: request_timeout
+    PayloadTooLarge:
+      description: Request body exceeded the per-endpoint size cap.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            tooLarge:
+              value:
+                error: payload_too_large
+    TooManyRequests:
+      description: |
+        Reserved for the future application-level limiter. Vercel
+        platform limits may surface this status today; clients should
+        honour `Retry-After` if present.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            limited:
+              value:
+                error: rate_limited
+    InternalError:
+      description: Unhandled exception inside the pipeline.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            extractionFailed:
+              value:
+                error: extraction_failed
+                request_id: 9f1c5d6e-1f8b-4a2b-9c3d-7e0a8b6c4d2f
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code.
+        detail:
+          type: string
+          description: Optional human-readable detail. Never localised.
+        request_id:
+          type: string
+          format: uuid
+          description: Forecast / abstract-quality only.
+      example:
+        error: missing_or_short_abstract
+        request_id: 9f1c5d6e-1f8b-4a2b-9c3d-7e0a8b6c4d2f
+
+    AuthorFeatureVector:
+      type: object
+      description: FateCore-shaped author feature inputs.
+      properties:
+        first_author_h_index:
+          type: number
+          nullable: true
+        last_author_h_index:
+          type: number
+          nullable: true
+        max_team_h_index:
+          type: number
+          nullable: true
+        median_team_h_index:
+          type: number
+          nullable: true
+        team_size_with_id:
+          type: integer
+          minimum: 0
+        international_collab:
+          type: integer
+          enum: [0, 1]
+
+    TargetJournalHint:
+      type: object
+      description: |
+        Optional caller-supplied target journal context. Forecast keeps
+        this opaque and forwards relevant fields to the journey engine.
+      additionalProperties: true
+      properties:
+        name:
+          type: string
+        issn:
+          type: string
+
+    ForecastRequest:
+      type: object
+      required: [title, abstract]
+      properties:
+        title:
+          type: string
+          minLength: 5
+          description: Manuscript title (>= 5 chars).
+        abstract:
+          type: string
+          minLength: 200
+          description: Manuscript abstract (>= 200 chars).
+        methods:
+          type: string
+          description: Optional methods section, capped at 8000 chars.
+          maxLength: 8000
+        results:
+          type: string
+          description: Optional results section, capped at 8000 chars.
+          maxLength: 8000
+        discussion:
+          type: string
+          description: Optional discussion section, capped at 8000 chars.
+          maxLength: 8000
+        full_text:
+          type: string
+          description: Optional full text, capped at 24000 chars.
+          maxLength: 24000
+        authors:
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+          description: Author list (array) or a semicolon/comma joined string.
+        year:
+          type: integer
+        first_affiliation:
+          type: string
+        funder:
+          type: string
+        funding:
+          type: string
+        is_preprint:
+          type: boolean
+        author_features:
+          $ref: '#/components/schemas/AuthorFeatureVector'
+        article_type:
+          type: string
+          default: '*'
+        mode:
+          type: string
+          enum: [Q100, Q500, auto]
+          default: auto
+          description: |
+            `auto` collapses to `Q100` when
+            `methods+results+discussion+full_text` total < 1500 chars
+            (response carries `auto_decision: 'Q100_short_body'`).
+        target_journal:
+          $ref: '#/components/schemas/TargetJournalHint'
+
+    RubricItem:
+      type: object
+      description: One scored Q100/Q500 rubric question.
+      properties:
+        item_id:
+          type: string
+        domain:
+          type: string
+          description: Coarse rubric domain (e.g., NOVEL, DESIGN, ANALYSIS).
+        score:
+          type: number
+          description: Numeric score (typically 1.0-5.0).
+        weight:
+          type: number
+        max_score:
+          type: number
+        question:
+          type: string
+        rationale:
+          type: string
+        evidence:
+          type: string
+          description: Verbatim manuscript snippet supporting the score.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        attempted:
+          type: boolean
+        scored:
+          type: boolean
+      example:
+        item_id: NOVEL_001
+        domain: NOVEL
+        score: 4.0
+        weight: 1.0
+        max_score: 5.0
+        question: Does the manuscript advance a question not previously answered?
+        rationale: Compares against three prior trials and identifies the unaddressed subgroup.
+        evidence: Unlike previous trials in this space, our cohort focuses on...
+        confidence: 0.72
+        attempted: true
+        scored: true
+
+    LlmHealth:
+      type: object
+      description: Per-request LLM-batch telemetry.
+      required: [status, attempted, failed]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        attempted:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+          description: |
+            Present when `status='degraded'`. Examples:
+            `gemini_400_invalid_key`, `rate_limited`, `unknown`.
+
+    JifPrediction:
+      type: object
+      description: FateCore JIF + downstream forecast bundle.
+      properties:
+        jif_point:
+          type: number
+          description: Point estimate of journal impact factor.
+        jif_ci_low:
+          type: number
+        jif_ci_high:
+          type: number
+        tier:
+          type: string
+          enum: [TOP, Q1, Q2, Q3, Q4]
+        desk_reject_risk:
+          type: number
+          minimum: 0
+          maximum: 1
+        review_days_point:
+          type: integer
+          minimum: 0
+        citations_5yr_low:
+          type: integer
+          minimum: 0
+        citations_5yr_high:
+          type: integer
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Capped at <= 0.30 when `extractor_used='rule_fallback'`.
+
+    JourneyStep:
+      type: object
+      description: One step in the suggested submission journey.
+      properties:
+        order:
+          type: integer
+          minimum: 1
+        journal:
+          $ref: '#/components/schemas/Journal'
+        accept_probability:
+          type: number
+          minimum: 0
+          maximum: 1
+        expected_review_days:
+          type: integer
+          minimum: 0
+        rationale:
+          type: string
+
+    CounterfactualSuggestion:
+      type: object
+      description: Per-item suggestion with predicted JIF lift.
+      properties:
+        item_id:
+          type: string
+        domain:
+          type: string
+        current_score:
+          type: number
+        target_score:
+          type: number
+        jif_lift:
+          type: number
+          description: Predicted JIF point uplift if the item is improved.
+        suggestion:
+          type: string
+
+    JointCounterfactual:
+      type: object
+      description: Joint multi-item lift summary.
+      properties:
+        items:
+          type: array
+          items:
+            type: string
+        jif_lift:
+          type: number
+        new_jif_point:
+          type: number
+        new_tier:
+          type: string
+          enum: [TOP, Q1, Q2, Q3, Q4]
+
+    ForecastResponse:
+      type: object
+      required:
+        - overall_score
+        - tier
+        - server_version
+        - request_id
+      allOf:
+        - $ref: '#/components/schemas/JifPrediction'
+      properties:
+        overall_score:
+          type: number
+        domain_rollup:
+          type: object
+          additionalProperties:
+            type: number
+        key_weaknesses:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricItem'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricItem'
+        items_attempted:
+          type: integer
+          minimum: 0
+        items_scored:
+          type: integer
+          minimum: 0
+        extractor_used:
+          type: string
+          enum: [llm, deterministic, rule_fallback]
+        llm_health:
+          $ref: '#/components/schemas/LlmHealth'
+        llm_errors:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        extraction_fallback_reason:
+          type: string
+          nullable: true
+          example: llm_batch_failures
+        journey:
+          type: array
+          minItems: 5
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/JourneyStep'
+        counterfactual_suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CounterfactualSuggestion'
+        joint_counterfactual:
+          $ref: '#/components/schemas/JointCounterfactual'
+        auto_decision:
+          type: string
+          nullable: true
+          enum: [Q100_short_body, null]
+        wall_ms:
+          type: integer
+          minimum: 0
+        server_version:
+          type: string
+          example: 0.4.0
+        request_id:
+          type: string
+          format: uuid
+
+    AbstractQualityRequest:
+      type: object
+      required: [title, abstract]
+      properties:
+        title:
+          type: string
+          minLength: 5
+        abstract:
+          type: string
+          minLength: 200
+        article_type:
+          type: string
+          default: '*'
+
+    AbstractQualityResponse:
+      type: object
+      required: [overall_score, server_version, request_id]
+      properties:
+        overall_score:
+          type: number
+        domain_rollup:
+          type: object
+          additionalProperties:
+            type: number
+        key_weaknesses:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricItem'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricItem'
+        items_attempted:
+          type: integer
+          minimum: 0
+        items_scored:
+          type: integer
+          minimum: 0
+        elapsed_ms:
+          type: integer
+          minimum: 0
+        server_version:
+          type: string
+          example: 0.3.1
+        request_id:
+          type: string
+          format: uuid
+
+    SimilarRequest:
+      type: object
+      required: [title, abstract]
+      properties:
+        title:
+          type: string
+          minLength: 5
+        abstract:
+          type: string
+          minLength: 100
+
+    SimilarPaper:
+      type: object
+      properties:
+        title:
+          type: string
+        venue:
+          type: string
+        issn:
+          type: string
+          nullable: true
+        if:
+          type: number
+          nullable: true
+        jif:
+          type: number
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+        citations:
+          type: integer
+          minimum: 0
+          nullable: true
+        doi:
+          type: string
+          nullable: true
+        openalex_id:
+          type: string
+          nullable: true
+        score:
+          type: number
+          description: Composite OpenAlex relevance score.
+
+    SimilarResponse:
+      type: object
+      properties:
+        similars:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/SimilarPaper'
+        query_used:
+          type: string
+          description: Final query string sent to OpenAlex.
+
+    Journal:
+      type: object
+      description: 800-journal shortlist row.
+      properties:
+        name:
+          type: string
+        issn:
+          type: string
+          nullable: true
+        jif:
+          type: number
+          nullable: true
+        jif_5yr:
+          type: number
+          nullable: true
+        tier:
+          type: string
+          enum: [TOP, Q1, Q2, Q3, Q4]
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        quartile:
+          type: string
+          enum: [Q1, Q2, Q3, Q4]
+          nullable: true
+        publisher:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        is_oa:
+          type: boolean
+          nullable: true
+        is_in_doaj:
+          type: boolean
+          nullable: true
+        apc:
+          type: number
+          nullable: true
+        h_index:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    JournalInfoResponse:
+      type: object
+      required: [journal, match_type, match_score]
+      properties:
+        journal:
+          $ref: '#/components/schemas/Journal'
+        match_type:
+          type: string
+          enum: [exact, startsWith, substring]
+        match_score:
+          type: integer
+          enum: [1000, 900, 700, 500]
+
+    JournalsSearchResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/Journal'
+
+    JournalCompareRequest:
+      type: object
+      description: |
+        `issns.length + names.length` is capped at 5. Either array may
+        be empty as long as at least one target is provided in total.
+      properties:
+        issns:
+          type: array
+          items:
+            type: string
+          maxItems: 5
+          default: []
+        names:
+          type: array
+          items:
+            type: string
+          maxItems: 5
+          default: []
+
+    JournalCompareResponse:
+      type: object
+      required: [journals]
+      properties:
+        journals:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/Journal'
+
+    ReferencesRequest:
+      type: object
+      required: [dois]
+      properties:
+        dois:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+
+    TopJournalSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+          minimum: 1
+        issn:
+          type: string
+          nullable: true
+        jif:
+          type: number
+          nullable: true
+
+    TopCategorySummary:
+      type: object
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+          minimum: 1
+
+    Reference:
+      type: object
+      description: One resolved bibliography entry.
+      properties:
+        doi:
+          type: string
+        title:
+          type: string
+        venue:
+          type: string
+          nullable: true
+        issn:
+          type: string
+          nullable: true
+        jif:
+          type: number
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+        citations:
+          type: integer
+          minimum: 0
+          nullable: true
+        warning:
+          type: string
+          description: e.g., `doi_metadata_mismatch`.
+        _missing:
+          type: boolean
+          description: True when the DOI could not be resolved.
+        error_code:
+          type: string
+          description: Present when `_missing=true`.
+          enum: ['404', timeout, network, http_500]
+
+    ReferencesResponse:
+      type: object
+      properties:
+        n_input:
+          type: integer
+          minimum: 0
+        n_resolved:
+          type: integer
+          minimum: 0
+        n_with_jif:
+          type: integer
+          minimum: 0
+        n_not_found:
+          type: integer
+          minimum: 0
+        n_lookup_errors:
+          type: integer
+          minimum: 0
+        n_venue_mismatch:
+          type: integer
+          minimum: 0
+        mean_jif:
+          type: number
+          nullable: true
+        median_jif:
+          type: number
+          nullable: true
+        top_journals:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopJournalSummary'
+        top_categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopCategorySummary'
+        year_median:
+          type: integer
+          nullable: true
+        year_min:
+          type: integer
+          nullable: true
+        year_max:
+          type: integer
+          nullable: true
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reference'
+
+    AuthorFeaturesRequest:
+      type: object
+      required: [authors]
+      properties:
+        authors:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            type: string
+
+    ResolvedAuthor:
+      type: object
+      properties:
+        name:
+          type: string
+        matched:
+          type: string
+          nullable: true
+        h_index:
+          type: integer
+          minimum: 0
+          nullable: true
+        works_count:
+          type: integer
+          minimum: 0
+          nullable: true
+        openalex_id:
+          type: string
+          nullable: true
+        institution:
+          type: string
+          nullable: true
+
+    AuthorFeaturesResponse:
+      type: object
+      properties:
+        first_author_h_index:
+          type: integer
+          nullable: true
+        last_author_h_index:
+          type: integer
+          nullable: true
+          description: Null when `single_author=true`.
+        single_author:
+          type: boolean
+        max_team_h_index:
+          type: integer
+          nullable: true
+        median_team_h_index:
+          type: number
+          nullable: true
+        team_size_with_id:
+          type: integer
+          minimum: 0
+          description: Count of authors with a resolvable h-index.
+        resolved:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedAuthor'
+
+    ExtrasLookupRequest:
+      type: object
+      required: [doi]
+      properties:
+        doi:
+          type: string
+          minLength: 4
+          description: |
+            DOI to resolve. Tolerates a leading `https://doi.org/`,
+            `http://doi.org/`, or `doi:` prefix; comparison is
+            case-insensitive.
+
+    ExtrasLookupResponse:
+      type: object
+      required: [doi, found, source]
+      properties:
+        doi:
+          type: string
+          description: Normalised (lower-cased, prefix-stripped) DOI.
+        found:
+          type: boolean
+        features:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: The matched `paper_extras_v2` row, or null.
+        source:
+          type: string
+          enum: [subset, unavailable]
+
+    ExtrasLookupUnavailable:
+      type: object
+      required: [doi, found, features, source, error]
+      properties:
+        doi:
+          type: string
+        found:
+          type: boolean
+          enum: [false]
+        features:
+          type: object
+          nullable: true
+        source:
+          type: string
+          enum: [unavailable]
+        error:
+          type: string
+          enum: [lookup_unavailable_in_production]
+
+    StatusResponse:
+      type: object
+      required: [ok, server_version, deploy_time, endpoints]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        server_version:
+          type: string
+          example: 0.4.0
+        deploy_time:
+          type: string
+          description: 7-char Vercel commit SHA, or `'local'`.
+          example: a1b2c3d
+        endpoints:
+          type: array
+          items:
+            type: string
+          example:
+            - forecast
+            - similar
+            - journal-info
+            - journals-search
+            - references
+            - author-features
+            - journal-compare
+            - abstract-quality
+        runtime_seconds_uptime_estimate:
+          type: string
+          example: unavailable (stateless)
+
+    TelemetryBeaconRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: Event name. Required, <= 64 chars.
+        props:
+          type: object
+          additionalProperties: true
+          description: Arbitrary serialisable event props.
+        ts:
+          type: integer
+          minimum: 0
+          description: Client timestamp in epoch milliseconds.
+        url:
+          type: string
+          description: Originating URL (truncated to 512 chars server-side).
+          maxLength: 2048
+        ua_summary:
+          type: string
+          description: Short UA summary (truncated to 32 chars server-side).
+          maxLength: 128
