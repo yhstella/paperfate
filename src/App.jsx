@@ -1,3 +1,4 @@
+import './lib/polyfills.js'
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import Nav from './components/Nav.jsx'
 import Hero from './components/Hero.jsx'
