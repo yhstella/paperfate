@@ -17,6 +17,8 @@
 const STORAGE_KEY = 'paperfate.forecast.history'
 const MAX_ENTRIES = 20
 const ABSTRACT_PREVIEW_LEN = 100
+const MAX_TAGS_PER_ENTRY = 5
+const TAG_MAX_LEN = 32
 
 function hasWindow() {
   return typeof window !== 'undefined' && !!window.localStorage
@@ -105,6 +107,8 @@ export function saveForecast(input) {
       extractor_used,
       request_id,
       wall_ms,
+      favorite: false,
+      tags: [],
     }
 
     const store = readStore()
@@ -121,7 +125,8 @@ export function getForecasts() {
   if (!hasWindow()) return []
   try {
     const store = readStore()
-    return Array.isArray(store.entries) ? store.entries.slice(0, MAX_ENTRIES) : []
+    const list = Array.isArray(store.entries) ? store.entries.slice(0, MAX_ENTRIES) : []
+    return list.map(withTagsShape)
   } catch {
     return []
   }
@@ -132,7 +137,8 @@ export function getForecast(id) {
   if (typeof id !== 'string' || !id) return null
   try {
     const store = readStore()
-    return store.entries.find(e => e && e.id === id) || null
+    const hit = store.entries.find(e => e && e.id === id) || null
+    return hit ? withTagsShape(hit) : null
   } catch {
     return null
   }
@@ -157,4 +163,116 @@ export function generateShareUrl(entryId) {
   } catch { /* ignore */ }
   if (!origin) return `/?forecast=${encodeURIComponent(entryId)}`
   return `${origin}/?forecast=${encodeURIComponent(entryId)}`
+}
+
+// Normalize tag string: trim, collapse internal whitespace, cap length.
+// Returns '' if the input is unusable.
+function normalizeTag(raw) {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.replace(/\s+/g, ' ').trim()
+  if (!trimmed) return ''
+  return trimmed.slice(0, TAG_MAX_LEN)
+}
+
+// Coerce any persisted entry into the favorite/tags schema. Old rows
+// written before Round 7 lack these fields — we treat them as
+// favorite:false / tags:[] without mutating the store on read.
+function withTagsShape(entry) {
+  if (!entry || typeof entry !== 'object') return entry
+  const favorite = entry.favorite === true
+  const tags = Array.isArray(entry.tags)
+    ? entry.tags
+        .map(normalizeTag)
+        .filter(Boolean)
+        .slice(0, MAX_TAGS_PER_ENTRY)
+    : []
+  return { ...entry, favorite, tags }
+}
+
+function updateEntry(id, mutator) {
+  if (!hasWindow()) return null
+  if (typeof id !== 'string' || !id) return null
+  try {
+    const store = readStore()
+    let updated = null
+    const next = store.entries.map(e => {
+      if (!e || e.id !== id) return e
+      const shaped = withTagsShape(e)
+      const mutated = mutator(shaped)
+      if (!mutated) return shaped
+      updated = mutated
+      return mutated
+    })
+    if (!updated) return null
+    writeStore({ entries: next })
+    return updated
+  } catch {
+    return null
+  }
+}
+
+export function setFavorite(id, value) {
+  const flag = value === true
+  return updateEntry(id, entry => ({ ...entry, favorite: flag }))
+}
+
+export function addTag(id, tag) {
+  const normalized = normalizeTag(tag)
+  if (!normalized) return null
+  return updateEntry(id, entry => {
+    const existing = Array.isArray(entry.tags) ? entry.tags : []
+    // Case-insensitive dedup; preserve the first-written casing.
+    const lower = normalized.toLowerCase()
+    if (existing.some(t => typeof t === 'string' && t.toLowerCase() === lower)) {
+      return entry
+    }
+    if (existing.length >= MAX_TAGS_PER_ENTRY) return entry
+    return { ...entry, tags: [...existing, normalized] }
+  })
+}
+
+export function removeTag(id, tag) {
+  const normalized = normalizeTag(tag)
+  if (!normalized) return null
+  const lower = normalized.toLowerCase()
+  return updateEntry(id, entry => {
+    const existing = Array.isArray(entry.tags) ? entry.tags : []
+    const next = existing.filter(t => typeof t === 'string' && t.toLowerCase() !== lower)
+    if (next.length === existing.length) return entry
+    return { ...entry, tags: next }
+  })
+}
+
+// Returns a pretty-printed JSON string of all entries in a stable shape
+// suitable for download. We omit nothing sensitive (manuscript text is
+// already not persisted), but normalize the field order so the file
+// looks deterministic across runs.
+export function exportAsJson() {
+  if (!hasWindow()) return '{"exported_at":null,"entries":[]}'
+  try {
+    const store = readStore()
+    const entries = (Array.isArray(store.entries) ? store.entries : [])
+      .map(withTagsShape)
+      .map(e => ({
+        id: e.id,
+        ts: e.ts,
+        title: e.title || '',
+        abstract_preview: e.abstract_preview || '',
+        mode: e.mode || 'abstract',
+        predictions: e.predictions || null,
+        extractor_used: e.extractor_used || null,
+        request_id: e.request_id || null,
+        wall_ms: Number.isFinite(+e.wall_ms) ? +e.wall_ms : null,
+        favorite: e.favorite === true,
+        tags: Array.isArray(e.tags) ? e.tags.slice(0, MAX_TAGS_PER_ENTRY) : [],
+      }))
+    return JSON.stringify({
+      schema: 'paperfate.forecast.history/v1',
+      exported_at: new Date().toISOString(),
+      count: entries.length,
+      entries,
+    }, null, 2)
+  } catch {
+    return '{"exported_at":null,"entries":[]}'
+  }
 }
