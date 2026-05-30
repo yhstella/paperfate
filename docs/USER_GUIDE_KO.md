@@ -274,7 +274,7 @@ Q500 예측이 성공할 때마다 간단한 레코드가 `localStorage`의
 - 익명 **텔레메트리 이벤트**(이벤트 이름 + 식별성 없는 메타 몇 개,
   예: `result_render`, `degraded: true`, `has_journey: true`).
   원고 본문은 절대 포함되지 않습니다. payload는 1KB로 캡됩니다.
-  `/api/_telemetry`로 가서 플랫폼 로그에만 떨어집니다.
+  `/api/telemetry-beacon`로 가서 플랫폼 로그에만 떨어집니다.
 - **Status 페이지** 프로브는 합성 더미 본문을 보냅니다. 사용자
   원고가 가는 일은 없습니다.
 
@@ -290,7 +290,7 @@ Q500 예측이 성공할 때마다 간단한 레코드가 `localStorage`의
 
 클라이언트 텔레메트리는 의도적으로 최소한입니다. 완전히 차단하고
 싶다면 일반적인 트래커 차단(uBlock, Brave shields, Firefox 엄격
-모드, 사내 DNS 필터 등)으로 `/api/_telemetry` 엔드포인트를
+모드, 사내 DNS 필터 등)으로 `/api/telemetry-beacon` 엔드포인트를
 드롭하면 됩니다 — 앱 기능은 그대로 동작합니다. 예측 엔드포인트
 자체는 텔레메트리를 호출하지 않습니다.
 

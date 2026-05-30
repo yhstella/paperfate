@@ -1,4 +1,4 @@
-// PaperFate · POST /api/_telemetry
+// PaperFate · POST /api/telemetry-beacon
 //
 // Minimal one-shot beacon sink for client telemetry. We deliberately
 // avoid any DB writes — events are dumped to stdout with a

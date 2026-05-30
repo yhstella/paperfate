@@ -122,7 +122,7 @@ Round 1 + Round 2 deliverables landed in production:
 - **New endpoints** — `/api/abstract-quality` (pure Q100 rubric),
   `/api/journal-compare` (up to 5 journals batched),
   `/api/author-features` (h-index aggregation with `single_author` flag),
-  `/api/_telemetry` (internal beacon sink).
+  `/api/telemetry-beacon` (internal beacon sink).
 - **UI panels** — `Compare.jsx` side-by-side journal comparison,
   Simulator quick rubric-check button, `ResultPanel` degraded-mode
   banner, abstract-quality fast path.
@@ -134,7 +134,7 @@ Round 1 + Round 2 deliverables landed in production:
   WARN, not FAIL, so the harness stays green during transient Gemini
   outages. Production smoke 9/9 OK as of latest deploy.
 - **Telemetry plumbing** — `src/lib/telemetry.js` `trackEvent()` (uses
-  `navigator.sendBeacon` when available) and `api/_telemetry.js` sink
+  `navigator.sendBeacon` when available) and `api/telemetry-beacon.js` sink
   are live; per-surface wiring lands in Round 3.
 
 Full endpoint reference: [`docs/API.md`](docs/API.md).
@@ -218,7 +218,7 @@ Side endpoints (`/api/similar`, `/api/journal-info`, `/api/journals-search`,
 `/api/journal-compare`, `/api/references`, `/api/author-features`) are
 self-contained: they hit either the bundled 800-journal shortlist
 (`weights/journals-shortlist.json`) or the OpenAlex REST API directly, with
-no LLM in the path. `/api/_telemetry` is a fire-and-forget log sink.
+no LLM in the path. `/api/telemetry-beacon` is a fire-and-forget log sink.
 
 ## Codex Round 7 collaboration
 

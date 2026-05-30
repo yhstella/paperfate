@@ -285,7 +285,7 @@ The selection persists across reloads (same browser).
 - Anonymous **telemetry beacons** (event name + a few non-identifying
   props, e.g. `result_render`, `degraded: true`, `has_journey: true`).
   No manuscript text is ever attached. Payloads are capped at 1 KB.
-  Beacons go to `/api/_telemetry` and are dumped to platform logs only.
+  Beacons go to `/api/telemetry-beacon` and are dumped to platform logs only.
 - The **Status page** sends a synthetic probe payload, never your
   manuscript.
 
@@ -301,7 +301,7 @@ The selection persists across reloads (same browser).
 
 The client telemetry is intentionally minimal. If you want to block it
 entirely, any standard tracker blocker (uBlock, Brave shields, Firefox
-strict mode, corporate DNS filter) can drop the `/api/_telemetry`
+strict mode, corporate DNS filter) can drop the `/api/telemetry-beacon`
 endpoint — the app keeps functioning normally. The forecast endpoints
 themselves do not run telemetry.
 

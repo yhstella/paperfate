@@ -573,13 +573,13 @@ has no separate senior slot (Codex Round 7 spec).
 
 ---
 
-## POST /api/_telemetry (internal)
+## POST /api/telemetry-beacon (internal)
 
 Minimal one-shot beacon sink. Events are dumped to Vercel logs prefixed with
 `[telemetry]`. No DB, no analytics dependency.
 
 - **Method**: `POST`
-- **URL**: `/api/_telemetry`
+- **URL**: `/api/telemetry-beacon`
 - **Latency budget**: 5 s.
 - **CORS scope**: `POST, OPTIONS`.
 - **Body cap**: 4 KB.
@@ -610,7 +610,7 @@ Minimal one-shot beacon sink. Events are dumped to Vercel logs prefixed with
 ### Example
 
 ```bash
-curl -X POST https://paperfate.com/api/_telemetry \
+curl -X POST https://paperfate.com/api/telemetry-beacon \
   -H "Content-Type: application/json" \
   -d '{"name":"forecast_view","props":{"tier":"Q1"},"ts":1717000000000,"url":"https://paperfate.com/","ua_summary":"Chrome"}'
 ```
@@ -629,4 +629,4 @@ curl -X POST https://paperfate.com/api/_telemetry \
 | `/api/journal-compare`    | POST   | 10 s   | ≤5 journals batched            |
 | `/api/references`         | POST   | 60 s   | ≤50 DOIs, OpenAlex resolve     |
 | `/api/author-features`    | POST   | 30 s   | ≤25 authors, h-index rollup    |
-| `/api/_telemetry`         | POST   | 5 s    | beacon sink (internal)         |
+| `/api/telemetry-beacon`         | POST   | 5 s    | beacon sink (internal)         |

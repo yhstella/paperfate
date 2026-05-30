@@ -187,10 +187,10 @@ const PROBES = [
     },
   },
   {
-    key: '_telemetry',
-    label: '/api/_telemetry',
+    key: 'telemetry-beacon',
+    label: '/api/telemetry-beacon',
     async run() {
-      const res = await fetch('/api/_telemetry', {
+      const res = await fetch('/api/telemetry-beacon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'smoke_test', props: { from: 'status-page' } }),

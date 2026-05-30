@@ -1,7 +1,7 @@
 // PaperFate · Minimal privacy-respecting client telemetry.
 //
 // Single export `trackEvent(name, props)` fires a one-shot beacon to
-// POST /api/_telemetry. Uses navigator.sendBeacon when available, falls
+// POST /api/telemetry-beacon. Uses navigator.sendBeacon when available, falls
 // back to fetch with keepalive:true. Safe in SSR (no-op when navigator
 // is undefined). All errors are swallowed — telemetry MUST NEVER throw
 // into the host app.
@@ -16,7 +16,7 @@
 // Internal sampling: SAMPLING_RATE knob (0..1). Default 1.0 = sampling
 // off, every call is sent.
 
-const ENDPOINT = '/api/_telemetry'
+const ENDPOINT = '/api/telemetry-beacon'
 const NAME_MAX = 64
 const PROPS_MAX_BYTES = 1024
 
@@ -24,6 +24,65 @@ const PROPS_MAX_BYTES = 1024
 // probabilistically drop events. Change this knob if/when volume forces
 // us to sample on the client.
 const SAMPLING_RATE = 1.0
+
+// Privacy: per-user opt-out persisted in localStorage. '1' means the
+// user has explicitly disabled telemetry from the privacy popover.
+const OPT_OUT_STORAGE_KEY = 'paperfate.telemetry.opt_out'
+const TELEMETRY_CHANGED_EVENT = 'paperfate:telemetry-changed'
+
+function readDnt() {
+  try {
+    if (typeof navigator === 'undefined') return false
+    // navigator.doNotTrack is the historic string-typed signal: '1' = DNT on.
+    // Some browsers also expose window.doNotTrack / navigator.msDoNotTrack
+    // — we only honour the standard '1' string on navigator.doNotTrack.
+    return navigator.doNotTrack === '1'
+  } catch { return false }
+}
+
+function readGpc() {
+  try {
+    if (typeof navigator === 'undefined') return false
+    // Global Privacy Control: boolean true when enabled.
+    return navigator.globalPrivacyControl === true
+  } catch { return false }
+}
+
+function readOptOut() {
+  try {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem(OPT_OUT_STORAGE_KEY) === '1'
+  } catch { return false }
+}
+
+export function getTelemetryStatus() {
+  const dnt = readDnt()
+  const gpc = readGpc()
+  const optOut = readOptOut()
+  return {
+    dnt,
+    gpc,
+    optOut,
+    effective_enabled: !(dnt || gpc || optOut),
+  }
+}
+
+export function setOptOut(value) {
+  const next = value === true || value === 1 || value === '1'
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (next) localStorage.setItem(OPT_OUT_STORAGE_KEY, '1')
+      else localStorage.removeItem(OPT_OUT_STORAGE_KEY)
+    }
+  } catch { /* private mode etc. — ignore */ }
+  // Notify any UI subscribers (e.g. the Nav privacy popover) so they
+  // re-render their toggle state without needing a page reload.
+  try {
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(TELEMETRY_CHANGED_EVENT, { detail: { optOut: next } }))
+    }
+  } catch { /* ignore */ }
+}
 
 function uaSummary(ua) {
   if (typeof ua !== 'string' || !ua) return ''
@@ -56,6 +115,11 @@ export function trackEvent(name, props) {
   try {
     // SSR / non-browser guard.
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return
+
+    // Privacy guards — DNT, GPC, and explicit user opt-out all suppress
+    // the dispatch silently. We deliberately check before sampling so
+    // these signals are honoured 100% of the time, never probabilistically.
+    if (readDnt() || readGpc() || readOptOut()) return
 
     // Sampling.
     if (SAMPLING_RATE < 1.0 && Math.random() >= SAMPLING_RATE) return

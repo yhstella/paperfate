@@ -334,7 +334,7 @@ async function probeExtrasLookup() {
 }
 
 async function probeTelemetry() {
-  const path = '/api/_telemetry'
+  const path = '/api/telemetry-beacon'
   const budget = 10_000
   const r = await httpJson('POST', path, { name: 'smoke_test', props: { from: 'smoke-v2' } })
   let ok = true, fail_reason = ''
@@ -342,7 +342,7 @@ async function probeTelemetry() {
   else if (r.status !== 204) { ok = false; fail_reason = `HTTP ${r.status}` }
 
   const label = statusLabel(r.status, r.ms, budget, ok, false)
-  record('_telemetry', r.status, r.ms, '-', label, fail_reason)
+  record('telemetry-beacon', r.status, r.ms, '-', label, fail_reason)
 }
 
 // ─── Print final table ──────────────────────────────────────────────────────
