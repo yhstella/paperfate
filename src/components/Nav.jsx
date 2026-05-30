@@ -1,4 +1,5 @@
-import { trackEvent } from '../lib/telemetry.js'
+import { useEffect, useRef, useState } from 'react'
+import { trackEvent, getTelemetryStatus, setOptOut } from '../lib/telemetry.js'
 import { FATECORE_VERSION } from '../lib/version.js'
 import { t, setLocale, useLocale } from '../lib/i18n.js'
 
@@ -48,6 +49,7 @@ export default function Nav() {
             onClick={() => onNavClick('cta_try_demo')}
           >Try the demo</a>
           <LocaleSwitcher locale={locale} onChange={onLocaleChange} />
+          <PrivacyMenu />
           <span
             className="chip ml-2 text-slate-200"
             role="note"
@@ -91,6 +93,117 @@ function LocaleSwitcher({ locale, onChange }) {
         EN
       </button>
     </div>
+  )
+}
+
+function PrivacyMenu() {
+  const [open, setOpen] = useState(false)
+  const [status, setStatus] = useState(() => getTelemetryStatus())
+  const wrapRef = useRef(null)
+
+  // Re-read status whenever the popover opens, whenever telemetry
+  // changes elsewhere, and whenever the user clicks outside to close.
+  useEffect(() => {
+    const refresh = () => setStatus(getTelemetryStatus())
+    if (typeof window !== 'undefined') {
+      window.addEventListener('paperfate:telemetry-changed', refresh)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('paperfate:telemetry-changed', refresh)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return undefined
+    setStatus(getTelemetryStatus())
+    const onDocClick = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const onToggle = () => {
+    const next = !(status.optOut)
+    setOptOut(next)
+    setStatus(getTelemetryStatus())
+  }
+
+  const isOn = status.effective_enabled
+  const forcedOffByBrowser = status.dnt || status.gpc
+  const statusLine = isOn
+    ? t('privacy.telemetry_status_on')
+    : t('privacy.telemetry_status_off')
+  const browserNote = status.dnt
+    ? t('privacy.telemetry_dnt_detected')
+    : status.gpc
+      ? t('privacy.telemetry_gpc_detected')
+      : ''
+
+  return (
+    <div ref={wrapRef} className="relative ml-2">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-label={t('nav.privacy_label')}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="rounded-md p-1.5 text-slate-300 transition hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+      >
+        <ShieldIcon on={isOn} />
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label={t('nav.privacy_label')}
+          className="absolute right-0 z-40 mt-2 w-64 rounded-lg border border-white/10 bg-ink-950/95 p-3 text-xs text-slate-200 shadow-xl backdrop-blur"
+        >
+          <p className="mb-2 font-medium text-slate-100">{statusLine}</p>
+          {browserNote && (
+            <p className="mb-2 text-[11px] leading-snug text-slate-400">{browserNote}</p>
+          )}
+          <button
+            type="button"
+            onClick={onToggle}
+            disabled={forcedOffByBrowser}
+            aria-disabled={forcedOffByBrowser}
+            className="w-full rounded-md border border-white/10 px-2 py-1.5 text-xs text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+          >
+            {status.optOut ? t('privacy.toggle_enable') : t('privacy.toggle_disable')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ShieldIcon({ on }) {
+  const stroke = on ? '#cbd5e1' : '#a78bfa'
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 3l8 3v6c0 4.5-3.4 8.4-8 9-4.6-.6-8-4.5-8-9V6l8-3z"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      {!on && (
+        <path
+          d="M5 5l14 14"
+          stroke={stroke}
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
   )
 }
 

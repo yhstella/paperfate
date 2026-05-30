@@ -3,7 +3,16 @@
     "lang_label": "언어",
     "switch_to_ko": "한국어",
     "switch_to_en": "English",
-    "primary_navigation": "주요 메뉴"
+    "primary_navigation": "주요 메뉴",
+    "privacy_label": "프라이버시 설정"
+  },
+  "privacy": {
+    "telemetry_status_on": "익명 사용 통계가 켜져 있습니다",
+    "telemetry_status_off": "익명 사용 통계가 꺼져 있습니다",
+    "telemetry_dnt_detected": "브라우저의 추적 방지(DNT) 신호를 감지하여 통계 전송을 중단했습니다.",
+    "telemetry_gpc_detected": "Global Privacy Control 신호를 감지하여 통계 전송을 중단했습니다.",
+    "toggle_disable": "통계 전송 끄기",
+    "toggle_enable": "통계 전송 켜기"
   },
   "simulator": {
     "title": "PaperFate 시뮬레이터",

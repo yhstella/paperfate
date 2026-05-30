@@ -3,7 +3,16 @@
     "lang_label": "Language",
     "switch_to_ko": "한국어",
     "switch_to_en": "English",
-    "primary_navigation": "Primary navigation"
+    "primary_navigation": "Primary navigation",
+    "privacy_label": "Privacy settings"
+  },
+  "privacy": {
+    "telemetry_status_on": "Anonymous usage telemetry is on",
+    "telemetry_status_off": "Anonymous usage telemetry is off",
+    "telemetry_dnt_detected": "Do Not Track signal detected — telemetry suppressed.",
+    "telemetry_gpc_detected": "Global Privacy Control detected — telemetry suppressed.",
+    "toggle_disable": "Disable telemetry",
+    "toggle_enable": "Enable telemetry"
   },
   "simulator": {
     "title": "PaperFate Simulator",
