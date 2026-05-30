@@ -316,7 +316,7 @@ export default function Compare() {
                   aria-label={t('compare.submit_button')}
                   className="btn-primary"
                 >
-                  {status === 'loading' ? 'Comparing…' : t('compare.submit_button')}
+                  {status === 'loading' ? t('common.loading') : t('compare.submit_button')}
                 </button>
               </div>
             </div>
@@ -369,9 +369,9 @@ export default function Compare() {
 // asc so missing rows sink to the bottom in both directions). Name is locale-
 // aware case-insensitive A-Z.
 const SORT_OPTIONS = [
-  { value: 'jif_desc',  label: 'JIF (desc)',  by: 'jif',  direction: 'desc' },
-  { value: 'jif_asc',   label: 'JIF (asc)',   by: 'jif',  direction: 'asc' },
-  { value: 'name_asc',  label: 'Name (A–Z)',  by: 'name', direction: 'asc' },
+  { value: 'jif_desc',  labelKey: 'compare.sort_by_jif',  suffix: ' (desc)', by: 'jif',  direction: 'desc' },
+  { value: 'jif_asc',   labelKey: 'compare.sort_by_jif',  suffix: ' (asc)',  by: 'jif',  direction: 'asc' },
+  { value: 'name_asc',  labelKey: 'compare.sort_by_name', suffix: '',        by: 'name', direction: 'asc' },
 ]
 const DEFAULT_SORT = 'jif_desc'
 const PAGE_SIZE = 4
@@ -514,7 +514,7 @@ function CompareResults({ journals }) {
             className="rounded-md border border-white/10 bg-white/[0.02] px-2.5 py-1.5 text-xs text-slate-200 hover:bg-white/[0.06] focus:outline-none focus:ring-1 focus:ring-fate-400/40 transition-colors"
           >
             {SORT_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <option key={o.value} value={o.value}>{t(o.labelKey) + (o.suffix || '')}</option>
             ))}
           </select>
         </div>
@@ -522,10 +522,10 @@ function CompareResults({ journals }) {
           <button
             type="button"
             onClick={onCopyTSV}
-            aria-label="Copy table as TSV"
+            aria-label={t('compare.copy_to_clipboard')}
             className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
           >
-            Copy table as TSV
+            {t('compare.copy_to_clipboard')}
           </button>
           <span
             role="status"
@@ -548,10 +548,10 @@ function CompareResults({ journals }) {
             type="button"
             onClick={onPrev}
             disabled={safePage === 0}
-            aria-label="Previous page"
+            aria-label={t('compare.page_prev')}
             className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            ← Prev
+            ← {t('compare.page_prev')}
           </button>
           <span aria-live="polite">
             Page {safePage + 1} of {pageCount} · journals {pageStart + 1}–{pageEnd} of {sorted.length}
@@ -560,10 +560,10 @@ function CompareResults({ journals }) {
             type="button"
             onClick={onNext}
             disabled={safePage >= pageCount - 1}
-            aria-label="Next page"
+            aria-label={t('compare.page_next')}
             className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Next →
+            {t('compare.page_next')} →
           </button>
         </nav>
       )}

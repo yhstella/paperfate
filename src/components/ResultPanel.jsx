@@ -91,7 +91,7 @@ export default function ResultPanel({ result, input }) {
             "{titleDisplay.slice(0, 90)}{titleTrunc ? '…' : ''}"
           </h2>
           {hasInputsStrip && (
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500" aria-label={t('result.run_inputs')}>
               <span>
                 Ran against {Number.isFinite(authorsCount) ? authorsCount : 0} authors detected
                 {' · '}{Number.isFinite(referencesCount) ? referencesCount : 0} reference DOIs
@@ -186,7 +186,7 @@ export default function ResultPanel({ result, input }) {
           )}
         </Card>
 
-        <Card title="Main weakness">
+        <Card title={t('result.weakness_title')}>
           <div className="text-sm leading-relaxed text-slate-300">{weakness}</div>
         </Card>
       </div>
@@ -194,7 +194,7 @@ export default function ResultPanel({ result, input }) {
       {journey && journey.length > 0 && (
         <section className="mt-8" aria-labelledby="journey-heading">
           <h3 id="journey-heading" className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">
-            Recommended submission journey
+            {t('result.journey_title')}
           </h3>
           <p className="mb-4 text-xs text-slate-500">
             An ordered sequence to try if a submission is declined. Each step is chosen so the
@@ -308,7 +308,7 @@ export default function ResultPanel({ result, input }) {
 
       {targetJournal && (
         <section className="mt-6 rounded-xl border border-fate-500/30 bg-fate-500/[0.06] p-4">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">If you submit to your target</h3>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{t('result.target_journal_title')}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="font-semibold text-slate-100">{targetJournal.name}</span>
             {targetJournal.issn && <span className="chip">ISSN {targetJournal.issn}</span>}
@@ -330,7 +330,7 @@ export default function ResultPanel({ result, input }) {
 
       {referencesSummary && referencesSummary.n_resolved > 0 && (
         <section className="mt-4 rounded-xl border border-white/5 bg-ink-900/60 p-4">
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Your bibliography</h3>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{t('result.bibliography_title')}</h3>
           <div className="flex flex-wrap items-baseline gap-2 sm:gap-3 text-[10px] sm:text-[11px]">
             <span className="text-sm text-slate-200">
               {referencesSummary.n_resolved}/{referencesSummary.n_input} references resolved
@@ -384,7 +384,7 @@ export default function ResultPanel({ result, input }) {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
         {suggestions && suggestions.length > 0 && (
           <section className="lg:col-span-3">
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">How to lift impact</h3>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">{t('result.suggestions_title')}</h3>
             <ol className="space-y-2 text-sm text-slate-300">
               {suggestions.map((s, i) => (
                 <li key={i} className="flex gap-3 rounded-lg border border-white/5 bg-ink-900/60 p-3">
@@ -396,7 +396,7 @@ export default function ResultPanel({ result, input }) {
           </section>
         )}
         <section className={(suggestions && suggestions.length > 0) ? 'lg:col-span-2' : 'lg:col-span-5'}>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">Most similar published papers</h3>
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">{t('result.similar_papers_title')}</h3>
           <ul className="space-y-2">
             {similars.map((p, i) => (
               <li key={i}>
@@ -426,7 +426,16 @@ export default function ResultPanel({ result, input }) {
       {(Number.isFinite(confidence) || fatecoreMeta?.version || fatecoreMeta?.timelineModel) && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
           {Number.isFinite(confidence) && (
-            <span className="chip" title="Overall extraction + model confidence">
+            <span
+              className="chip"
+              title={
+                confidence < 0.5
+                  ? t('result.confidence_low')
+                  : confidence < 0.8
+                    ? t('result.confidence_med')
+                    : t('result.confidence_high')
+              }
+            >
               confidence {(confidence * 100).toFixed(0)}%
             </span>
           )}

@@ -764,7 +764,7 @@ export default function Simulator() {
             <Bullet>LLM-graded novelty, methods, clinical relevance</Bullet>
           </ul>
           <div className="mt-6">
-            <div className="text-xs text-slate-500 mb-2">Try a sample:</div>
+            <div className="text-xs text-slate-500 mb-2">{t('simulator.sample_section_title')}</div>
             <div className="flex flex-wrap gap-2">
               {SAMPLES.map(s => (
                 <button
@@ -812,7 +812,7 @@ export default function Simulator() {
               </div>
             </div>
             <div className="text-[11px] text-slate-500">
-              Abstract → fast scan · Full manuscript → deep rubric (slower, more accurate methods scoring)
+              {t('simulator.mode_hint')}
             </div>
 
             {inputMode === 'abstract' && (
@@ -843,7 +843,7 @@ export default function Simulator() {
               id={`sim-tabpanel-${inputMode}`}
               aria-labelledby={`sim-tab-${inputMode}`}
             >
-            <Field label={inputMode === 'full' ? 'Full manuscript file' : 'Abstract'} htmlFor={inputMode === 'full' ? undefined : 'sim-abstract-textarea'}>
+            <Field label={inputMode === 'full' ? 'Full manuscript file' : t('simulator.abstract_label')} htmlFor={inputMode === 'full' ? undefined : 'sim-abstract-textarea'}>
               {inputMode === 'full' ? (
                 <FileUpload
                   onText={(t) => {
@@ -887,7 +887,7 @@ export default function Simulator() {
             </Field>
             </div>
 
-            <Field label="Target journal (optional)" htmlFor="sim-target-journal">
+            <Field label={t('simulator.target_label')} htmlFor="sim-target-journal">
               <input
                 id="sim-target-journal"
                 value={targetJournalInput}
@@ -900,7 +900,7 @@ export default function Simulator() {
             </Field>
 
             <Field
-              label={`Authors${authorsAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}
+              label={`${t('simulator.authors_label')}${authorsAutoDetected ? ` (${t('simulator.autodetect_active')})` : ' (optional)'}`}
               htmlFor="sim-authors"
             >
               <textarea
@@ -919,7 +919,7 @@ export default function Simulator() {
             </Field>
 
             <Field
-              label={`Reference DOIs${referencesAutoDetected ? ' (auto-detected — edit if wrong)' : ' (optional)'}`}
+              label={`${t('simulator.references_label')}${referencesAutoDetected ? ` (${t('simulator.autodetect_active')})` : ' (optional)'}`}
               htmlFor="sim-references"
             >
               <textarea
@@ -1024,7 +1024,7 @@ export default function Simulator() {
                   title="View past forecasts saved on this device"
                   className="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent transition-colors"
                 >
-                  History
+                  {t('simulator.history_button')}
                 </button>
                 {(title || text || authorsInput || referencesInput) && status !== 'running' && (
                   <button
@@ -1034,7 +1034,7 @@ export default function Simulator() {
                     title="Clear all fields and remove the saved draft"
                     className="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/20 bg-transparent transition-colors"
                   >
-                    Clear
+                    {t('simulator.clear_button')}
                   </button>
                 )}
                 {inputMode === 'abstract' && (
