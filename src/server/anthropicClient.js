@@ -171,6 +171,7 @@ export class PaperFateExtractor {
         try {
           results[idx] = await this.scoreItem(items[idx], manuscript, articleType)
         } catch (e) {
+          const detail = `Extraction failed: ${e.message || String(e)}`
           results[idx] = {
             id: items[idx].id,
             score: 'UNK',
@@ -178,9 +179,10 @@ export class PaperFateExtractor {
             confidence: 0.0,
             evidence_text: '',
             evidence_section: '',
-            rationale_short: `Extraction failed: ${e.message || String(e)}`,
+            rationale_short: 'LLM scoring unavailable — fell back to rule pre-pass for this item.',
             scoring_mode: 'llm',
             _error: true,
+            _error_detail: detail,
           }
         }
         if (onItem) {

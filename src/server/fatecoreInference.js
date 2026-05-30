@@ -504,13 +504,31 @@ export function predictFromExtraction(manuscript, extraction, opts = {}) {
 
   const journey = generateJourney(predictions.jcr_jif, manuscript, extraction)
 
+  // Confidence cap by coverage: penalize predictions when too few rubric items
+  // were applicable/scored. applicable_items = items where applicability is not
+  // 'not_applicable' AND score is a finite number. Fallback uses
+  // items_attempted with floor 8.
+  const itemsArr = extractionItems(extraction)
+  const applicableItems = itemsArr.filter(
+    it => it && it.applicability !== 'not_applicable' && Number.isFinite(scoreToNumber(it)) && scoreToNumber(it) >= 0
+  ).length
+  const itemsScored = Number.isFinite(extraction?.items_scored)
+    ? extraction.items_scored
+    : itemsArr.filter(it => Number.isFinite(scoreToNumber(it)) && scoreToNumber(it) >= 0).length
+  const denomForCoverage = Math.max(8, applicableItems || Number(extraction?.items_attempted) || 0)
+  const coverageRatio = clamp(itemsScored / denomForCoverage, 0, 1)
+  let rawConfidence = (modelTargets ? 0.72 : 0.45) + 0.18 * extractionConfidence + 0.08 * q
+  rawConfidence *= coverageRatio
+  // Hard cap: if fewer than 5 items were scored, confidence is capped at 0.20.
+  if (itemsScored < 5) rawConfidence = Math.min(rawConfidence, 0.20)
+
   return {
     predictions,
     domain_scores: domain,
     weakness: extraction?.key_weaknesses || extraction?.weakest_domains || [],
     similar_papers: [],
     journey,
-    confidence: +clamp((modelTargets ? 0.72 : 0.45) + 0.18 * extractionConfidence + 0.08 * q, 0, 0.95).toFixed(3),
+    confidence: +clamp(rawConfidence, 0, 0.95).toFixed(3),
     cost_usd: Number(extraction?.cost?.total_usd ?? extraction?.cost_usd ?? 0),
     fatecore: {
       version: model.version,
@@ -553,13 +571,24 @@ function detectFields(manuscript, extraction) {
     rheumatology: /\b(rheumatoid|lupus|arthritis|autoimmune|vasculitis)\b/,
     psychiatry: /\b(depression|schizophrenia|bipolar|anxiety|psychiatric|psychotic|suicide)\b/,
     infectious: /\b(infection|infectious|hiv|tuberculosis|antimicrobial|sepsis|covid|vaccine|microbi)\b/,
-    pediatrics: /\b(pediatric|paediatric|neonatal|infant|childhood|child|children|adolescent|birth cohort)\b/,
-    obgyn: /\b(pregnan|obstetric|gynec|fetal|cesarean|prenatal|postpartum)\b/,
+    pediatrics: /\b(pediatric|paediatric|neonatal|infant|childhood|child|children|adolescent|birth cohort|nicu|picu|perinatal|school[-\s]age|pediatric oncology)\b/,
+    obgyn: /\b(pregnan|obstetric|gynec|fetal|cesarean|prenatal|postpartum|maternal|preeclampsia|preterm|ivf|in vitro fertilization|endometriosis|pcos|menopause|fertility)\b/,
     hematology: /\b(blood|leukemia|lymphoma|anemia|hemato|sickle|thrombo)\b/,
-    surgery: /\b(surgery|surgical|laparoscop|operative|perioperative|anesthesia)\b/,
+    surgery: /\b(surgery|surgical|laparoscop|operative|perioperative|anesthesia|thoracotom|transplant|bariatric|robotic)\b/,
     public_health: /\b(epidemiol|public health|population|policy|disparities)\b/,
-    ai_imaging: /\b(deep learning|neural network|machine learning|convolutional|radiomic)\b.{0,200}\b(image|imaging|radiograph|mri|ct|x-ray)\b/,
+    allergy: /\b(allergy|allergic|allergen|anaphyla|atopic|urticaria|eczema|hay fever)\b/,
+    dermatology: /\b(dermatolog|skin|psoriasis|melanoma|cutaneous|epidermal|dermat)\b/,
+    ophthalmology: /\b(ophthalm|retina|cornea|glaucoma|cataract|macular|ocular|visual acuity)\b/,
+    urology: /\b(urolog|prostate|bladder|urinary|erectile|kidney stone|nephrolith)\b/,
+    ent: /\b(otolaryngol|ent|sinus|tonsil|laryng|otitis|hearing loss|cochlear)\b/,
+    anesth: /\b(anesthesi|anaesthesi|sedation|analgesi|epidural|spinal block|nerve block)\b/,
+    emergency: /\b(emergency department|ed visit|trauma|triage|resuscitation|acute care)\b/,
+    geriatrics: /\b(geriatric|elderly|older adult|aging|aged|frailty|sarcopenia)\b/,
   }
+  // ai_imaging: require ML term AND imaging term (separate tests, no co-occurrence window).
+  const aiMlRe = /\b(deep learning|neural network|machine learning|convolutional|radiomic)\b/
+  const aiImgRe = /\b(image|imaging|radiograph|mri|ct|x-ray)\b/
+  if (aiMlRe.test(blob) && aiImgRe.test(blob)) fields.push('ai_imaging')
   for (const [k, re] of Object.entries(patterns)) {
     if (re.test(blob)) fields.push(k)
   }
@@ -584,6 +613,15 @@ const FIELD_CATEGORY_MAP = {
   surgery: ['surgery'],
   public_health: ['public', 'environmental occupational'],
   ai_imaging: ['radiology', 'imaging', 'computer'],
+  // TODO: confirm canonical JCR category strings for these subspecialties
+  allergy: ['allergy', 'immunology'],
+  dermatology: ['dermatology'],
+  ophthalmology: ['ophthalmology'],
+  urology: ['urology', 'nephrology'],
+  ent: ['otorhinolaryngology', 'otolaryngology'],
+  anesth: ['anesthesiology'],
+  emergency: ['emergency medicine'],
+  geriatrics: ['geriatrics', 'gerontology'],
 }
 
 // Split a journal-category string into a set of normalized tokens
@@ -629,8 +667,13 @@ function computeSwitchCost(from, to) {
     ? Math.min(1, Math.abs(Math.log(fJif) - Math.log(tJif)) / Math.log(8))  // log-ratio of 8x → 1.0
     : 0.3                                                                   // unknown → moderate proxy
 
+  // APC delta: normalized absolute USD gap, $5k → 1.0.
+  const apcDelta = Math.max(0, Math.min(1, Math.abs((+to.apc_usd || 0) - (+from.apc_usd || 0)) / 5000))
+  // Tier downshift penalty: moving from a core journal to a non-core one.
+  const tierDownshift = (from.is_core === 1 && to.is_core === 0) ? 1 : 0
+
   // Weighted sum, clipped to [0, 1].
-  const cost = Math.min(1, 0.45 * catDist + 0.25 * publisherChange + 0.20 * jifGap + 0.10 * oaChange)
+  const cost = Math.min(1, 0.45 * catDist + 0.25 * publisherChange + 0.20 * jifGap + 0.10 * oaChange + 0.08 * apcDelta + 0.02 * tierDownshift)
 
   const reasons = []
   if (catDist <= 0.15) reasons.push('same scope')
@@ -645,6 +688,9 @@ function computeSwitchCost(from, to) {
   else reasons.push('large IF tier shift — adjust framing')
 
   if (oaChange) reasons.push(from.is_oa ? 'switching to subscription model' : 'switching to OA (APC may apply)')
+
+  if (apcDelta >= 0.4) reasons.push('material APC cost change')
+  if (tierDownshift) reasons.push('downshift from core to non-core')
 
   const label = cost < 0.2 ? 'minimal'
               : cost < 0.45 ? 'low'
@@ -708,6 +754,8 @@ function generateJourney(jifPred, manuscript, extraction) {
     if (!pick) continue
     usedKeys.add(pick.issn || pick.name)
     const sc = computeSwitchCost(prevPick, pick)
+    const apcUsd = Number.isFinite(+pick.apc_usd) ? +pick.apc_usd : null
+    const predatoryFlag = (pick.is_core == 0 && pick.is_oa == 1 && (+pick.apc_usd || 0) > 2500)
     result.push({
       step: t.step,
       venue: pick.name,
@@ -720,6 +768,8 @@ function generateJourney(jifPred, manuscript, extraction) {
       switchReason: sc.reason,
       tier: pick.tier,
       is_oa: pick.is_oa,
+      apc_usd: apcUsd,
+      predatory_flag: predatoryFlag,
     })
     prevPick = pick
   }

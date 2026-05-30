@@ -234,16 +234,20 @@ export class GeminiExtractor {
         this.cost.parse_errors += items.length
         return items.map(it => ({
           id: it.id, score: 'UNK', applicability: 'indeterminate', confidence: 0.0,
-          evidence_text: '', evidence_section: '', rationale_short: 'Parse error: no JSON array found.',
+          evidence_text: '', evidence_section: '',
+          rationale_short: 'Score parsing failed — fell back to rule pre-pass for this item.',
           scoring_mode: 'llm', _parse_error: true,
+          _error_detail: 'Parse error: no JSON array found.',
         }))
       }
-      try { arr = JSON.parse(m[0]) } catch {
+      try { arr = JSON.parse(m[0]) } catch (e2) {
         this.cost.parse_errors += items.length
         return items.map(it => ({
           id: it.id, score: 'UNK', applicability: 'indeterminate', confidence: 0.0,
-          evidence_text: '', evidence_section: '', rationale_short: 'Parse error: invalid JSON.',
+          evidence_text: '', evidence_section: '',
+          rationale_short: 'Score parsing failed — fell back to rule pre-pass for this item.',
           scoring_mode: 'llm', _parse_error: true,
+          _error_detail: `Parse error: invalid JSON (${e2.message || String(e2)}).`,
         }))
       }
     }
@@ -251,8 +255,10 @@ export class GeminiExtractor {
       this.cost.parse_errors += items.length
       return items.map(it => ({
         id: it.id, score: 'UNK', applicability: 'indeterminate', confidence: 0.0,
-        evidence_text: '', evidence_section: '', rationale_short: 'Parse error: not an array.',
+        evidence_text: '', evidence_section: '',
+        rationale_short: 'Score parsing failed — fell back to rule pre-pass for this item.',
         scoring_mode: 'llm', _parse_error: true,
+        _error_detail: 'Parse error: not an array.',
       }))
     }
     // Match by id if present, else by position
@@ -276,12 +282,15 @@ export class GeminiExtractor {
     return arr[0]
   }
 
-  // Score many items. concurrency must be 1 to respect Gemini RPM cap.
-  async batchScore(items, manuscript, articleType, { concurrency = 1, onItem } = {}) {
-    // Slice into batches of this.batchSize
+  // Score many items. Workers run in parallel but each call serialises through
+  // this.limiter.take() inside _callOnce, so the RPM cap is still respected.
+  async batchScore(items, manuscript, articleType, { concurrency = 4, onItem } = {}) {
+    // Slice into batches of this.batchSize, recording the global offset of each
+    // batch so we can write results without indexOf (which is O(n) and breaks
+    // on duplicate item references).
     const batches = []
     for (let i = 0; i < items.length; i += this.batchSize) {
-      batches.push(items.slice(i, i + this.batchSize))
+      batches.push({ slice: items.slice(i, i + this.batchSize), offset: i })
     }
     this.cost.items_in += items.length
     const results = new Array(items.length).fill(null)
@@ -289,30 +298,50 @@ export class GeminiExtractor {
     const systemText = getSystemPrompt()
       + '\n\nThis run scores MULTIPLE items per request. Always return a JSON ARRAY.'
 
-    let written = 0
-    for (const batch of batches) {
-      const userText = buildBatchPrompt(batch, manuscript, articleType)
-      let parsed
-      try {
-        const { text } = await this._callWithRetry(systemText, userText)
-        parsed = this._parseBatch(text, batch)
-      } catch (e) {
-        parsed = batch.map(it => ({
-          id: it.id, score: 'UNK', applicability: 'indeterminate', confidence: 0.0,
-          evidence_text: '', evidence_section: '', rationale_short: `Batch failed: ${e.message || String(e)}`,
-          scoring_mode: 'llm', _error: true,
-        }))
-      }
-      // Place into results array at the same offsets
-      for (let j = 0; j < batch.length; j++) {
-        const globalIdx = items.indexOf(batch[j])
-        results[globalIdx] = parsed[j]
-        this.cost.items_out += 1
-        if (onItem) {
-          try { onItem(parsed[j], written + j, items.length) } catch {}
+    // Worker pool: N async workers pull the next batch index from a shared
+    // counter. Note the semantic shift from the previous sequential impl —
+    // onItem is now invoked in completion order, not strict input order.
+    const workerCount = Math.min(concurrency ?? 4, batches.length)
+    let nextIdx = 0
+    let completed = 0
+
+    const runWorker = async () => {
+      while (true) {
+        const idx = nextIdx++
+        if (idx >= batches.length) return
+        const { slice: batch, offset } = batches[idx]
+        const userText = buildBatchPrompt(batch, manuscript, articleType)
+        let parsed
+        try {
+          const { text } = await this._callWithRetry(systemText, userText)
+          parsed = this._parseBatch(text, batch)
+        } catch (e) {
+          parsed = batch.map(it => ({
+            id: it.id, score: 'UNK', applicability: 'indeterminate', confidence: 0.0,
+            evidence_text: '', evidence_section: '',
+            rationale_short: 'LLM scoring unavailable — fell back to rule pre-pass for this item.',
+            scoring_mode: 'llm', _error: true,
+            _error_detail: `Batch failed: ${e.message || String(e)}`,
+          }))
+        }
+        // Place into results at the recorded offsets; onItem fires in
+        // completion order (not strict input order) since workers race.
+        for (let j = 0; j < batch.length; j++) {
+          const globalIdx = offset + j
+          results[globalIdx] = parsed[j]
+          this.cost.items_out += 1
+          if (onItem) {
+            try { onItem(parsed[j], completed, items.length) } catch {}
+          }
+          completed += 1
         }
       }
-      written += batch.length
+    }
+
+    if (workerCount > 0) {
+      const workers = []
+      for (let w = 0; w < workerCount; w++) workers.push(runWorker())
+      await Promise.all(workers)
     }
     return results
   }

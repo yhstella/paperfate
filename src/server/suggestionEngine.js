@@ -13,10 +13,49 @@
 // LightGBM models are module-scope cached, so total overhead is ~5–30 ms.
 
 import { predictFromExtraction } from './fatecoreInference.js'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+// Inline-load Q500.json at module init so we know each item's rubric ceiling
+// (we DO NOT import from extract.js to avoid the Codex Round 7 lock).
+let Q500 = { items: [] }
+try {
+  Q500 = JSON.parse(readFileSync(join(HERE, '..', '..', 'docs', 'rubric', 'Q500.json'), 'utf-8'))
+} catch {
+  Q500 = { items: [] }
+}
+const MAX_SCORE_BY_ID = Object.fromEntries(
+  (Q500.items || []).map(it => [
+    it.id,
+    it.rubric?.length === 6 ? 5 : it.rubric?.length === 4 ? 5 : (it.rubric?.length ?? 5) - 1,
+  ])
+)
+const Q500_BY_ID = Object.fromEntries((Q500.items || []).map(it => [it.id, it]))
 
 const TARGET_ANCHOR = 4   // "addressed and adequate" — what counterfactual lifts the item to
 const MAX_SUGGESTIONS = 5
 const JOINT_TOP_N = 3
+
+// Article-type guardrail: returns true if this item is incompatible with this
+// manuscript's article type and should therefore be skipped as a suggestion.
+function shouldSkipForArticleType(itemMeta, manuscript) {
+  if (!itemMeta) return false
+  const types = itemMeta.types
+  const articleType = String(manuscript?.article_type || '').trim()
+  // (a) item.types is an array, manuscript.article_type is non-empty non-'*', not in item.types
+  if (Array.isArray(types) && articleType && articleType !== '*' && !types.includes(articleType)) {
+    return true
+  }
+  // (b) item.types is exactly ['RCT'] — require abstract to look like an RCT, conservative skip if missing
+  if (Array.isArray(types) && types.length === 1 && types[0] === 'RCT') {
+    const abstract = manuscript?.abstract
+    if (!abstract || !String(abstract).trim()) return true
+    if (!/\b(randomi[sz]ed|allocation|placebo-controlled|double-blind)\b/i.test(String(abstract))) return true
+  }
+  return false
+}
 
 function withItemScore(extraction, itemId, newScore) {
   if (!extraction || !Array.isArray(extraction.items)) return extraction
@@ -47,8 +86,15 @@ export function generateSuggestions(extraction, manuscript, baselinePred, opts =
 
   const singles = []
   for (const w of weaknesses.slice(0, MAX_SUGGESTIONS)) {
-    if (!w?.id || !Number.isFinite(w?.score) || w.score >= TARGET_ANCHOR) continue
-    const cf = withItemScore(extraction, w.id, TARGET_ANCHOR)
+    if (!w?.id || !Number.isFinite(w?.score)) continue
+    const itemMeta = Q500_BY_ID[w.id]
+    // Article-type guardrail: skip items that don't apply to this manuscript.
+    if (shouldSkipForArticleType(itemMeta, manuscript)) continue
+    // Per-item target: cap TARGET_ANCHOR by the item's actual rubric ceiling.
+    const itemMax = MAX_SCORE_BY_ID[w.id]
+    const targetScore = Math.min(TARGET_ANCHOR, Number.isFinite(itemMax) ? itemMax : 4)
+    if (w.score >= targetScore) continue
+    const cf = withItemScore(extraction, w.id, targetScore)
     let liftPred
     try { liftPred = predictFromExtraction(manuscript, cf, opts) }
     catch { continue }
@@ -61,7 +107,7 @@ export function generateSuggestions(extraction, manuscript, baselinePred, opts =
       name: w.name,
       domain: w.domain,
       current_score: w.score,
-      target_score: TARGET_ANCHOR,
+      target_score: targetScore,
       predicted_jif_lift: lift,
       rationale: w.rationale || null,
     })
@@ -76,7 +122,8 @@ export function generateJointCounterfactual(extraction, manuscript, baselinePred
   if (!Array.isArray(singletonSuggestions) || singletonSuggestions.length < 2) return null
 
   const top = singletonSuggestions.slice(0, JOINT_TOP_N)
-  const idMap = new Map(top.map(s => [s.id, TARGET_ANCHOR]))
+  // Use per-item target_score (already capped by rubric ceiling in singletons).
+  const idMap = new Map(top.map(s => [s.id, Number.isFinite(s.target_score) ? s.target_score : TARGET_ANCHOR]))
   const cf = withItemScores(extraction, idMap)
 
   let liftPred
