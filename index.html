@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0b10" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('paperfate.theme');
+          if (t !== 'light' && t !== 'dark' && t !== 'system') t = 'system';
+          var resolved = t;
+          if (t === 'system') {
+            resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', resolved);
+        } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+      })();
+    </script>
     <meta name="description" content="PaperFate forecasts journal tier, desk-reject risk, review timeline, and citation potential for biomedical manuscripts before submission." />
     <meta property="og:title" content="PaperFate — Simulate your manuscript's future" />
     <meta property="og:description" content="Pre-submission forecast for biomedical manuscripts: journal tier, desk-reject risk, review timeline, citation potential, submission journey, and actionable suggestions — all calibrated on 3.5M+ papers." />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { trackEvent, getTelemetryStatus, setOptOut } from '../lib/telemetry.js'
 import { FATECORE_VERSION } from '../lib/version.js'
 import { t, setLocale, useLocale } from '../lib/i18n.js'
+import { useTheme } from '../lib/theme.js'
 
 const LOCALE_OPTIONS = [
   { code: 'ko', short: 'KO', labelKey: 'nav.switch_to_ko', fallbackLabel: '한국어' },
@@ -57,6 +58,7 @@ export default function Nav() {
             onClick={() => onNavClick('cta_try_demo')}
           >Try the demo</a>
           <LocaleSwitcher locale={locale} onChange={onLocaleChange} />
+          <ThemeToggle />
           <PrivacyMenu />
           <span
             className="chip ml-2 text-slate-200"
@@ -230,6 +232,37 @@ function ShieldIcon({ on }) {
         />
       )}
     </svg>
+  )
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme()
+  const order = ['light', 'dark', 'system']
+  const next = order[(order.indexOf(theme) + 1) % order.length] || 'system'
+  const icon = theme === 'light' ? '☀' : theme === 'dark' ? '🌙' : 'auto'
+  const stateLabel = theme === 'light'
+    ? 'light'
+    : theme === 'dark'
+      ? 'dark'
+      : 'system'
+  const onClick = () => {
+    setTheme(next)
+    try {
+      trackEvent('theme_change', { from: theme, to: next })
+    } catch (_) {
+      // telemetry must never break UI
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Theme: ${stateLabel}. Click to switch to ${next}.`}
+      title={`Theme: ${stateLabel}`}
+      className="ml-2 rounded-md px-2 py-1 text-xs font-medium text-slate-300 transition hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-fate-400/60"
+    >
+      <span aria-hidden="true">{icon}</span>
+    </button>
   )
 }
 
