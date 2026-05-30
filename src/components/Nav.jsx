@@ -3,6 +3,13 @@ import { trackEvent, getTelemetryStatus, setOptOut } from '../lib/telemetry.js'
 import { FATECORE_VERSION } from '../lib/version.js'
 import { t, setLocale, useLocale } from '../lib/i18n.js'
 
+const LOCALE_OPTIONS = [
+  { code: 'ko', short: 'KO', labelKey: 'nav.switch_to_ko', fallbackLabel: '한국어' },
+  { code: 'en', short: 'EN', labelKey: 'nav.switch_to_en', fallbackLabel: 'English' },
+  { code: 'zh', short: 'ZH', labelKey: 'nav.switch_to_zh', fallbackLabel: '中文' },
+  { code: 'ja', short: 'JA', labelKey: 'nav.switch_to_ja', fallbackLabel: '日本語' },
+]
+
 export default function Nav() {
   const locale = useLocale()
   const onNavClick = (target) => {
@@ -10,6 +17,7 @@ export default function Nav() {
   }
   const onLocaleChange = (next) => {
     if (next === locale) return
+    if (!LOCALE_OPTIONS.some((o) => o.code === next)) return
     setLocale(next)
     trackEvent('locale_change', { locale: next })
   }
@@ -74,24 +82,23 @@ function LocaleSwitcher({ locale, onChange }) {
       aria-label={t('nav.lang_label')}
       className="ml-2 flex items-center gap-0.5 rounded-lg border border-white/5 bg-white/[0.02] p-0.5"
     >
-      <button
-        type="button"
-        onClick={() => onChange('ko')}
-        aria-label={t('nav.switch_to_ko')}
-        aria-pressed={locale === 'ko'}
-        className={`${baseBtn} ${locale === 'ko' ? activeCls : inactiveCls}`}
-      >
-        KO
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('en')}
-        aria-label={t('nav.switch_to_en')}
-        aria-pressed={locale === 'en'}
-        className={`${baseBtn} ${locale === 'en' ? activeCls : inactiveCls}`}
-      >
-        EN
-      </button>
+      {LOCALE_OPTIONS.map((opt) => {
+        const translated = t(opt.labelKey)
+        const label = translated === opt.labelKey ? opt.fallbackLabel : translated
+        const isActive = locale === opt.code
+        return (
+          <button
+            key={opt.code}
+            type="button"
+            onClick={() => onChange(opt.code)}
+            aria-label={label}
+            aria-pressed={isActive}
+            className={`${baseBtn} ${isActive ? activeCls : inactiveCls}`}
+          >
+            {opt.short}
+          </button>
+        )
+      })}
     </div>
   )
 }

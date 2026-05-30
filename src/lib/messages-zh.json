@@ -1,0 +1,125 @@
+{
+  "nav": {
+    "lang_label": "语言",
+    "switch_to_ko": "한국어",
+    "switch_to_en": "English",
+    "switch_to_zh": "中文",
+    "switch_to_ja": "日本語",
+    "primary_navigation": "主导航",
+    "privacy_label": "隐私设置"
+  },
+  "privacy": {
+    "telemetry_status_on": "匿名使用统计已开启",
+    "telemetry_status_off": "匿名使用统计已关闭",
+    "telemetry_dnt_detected": "检测到浏览器 Do Not Track 信号，已停止统计上传。",
+    "telemetry_gpc_detected": "检测到 Global Privacy Control 信号，已停止统计上传。",
+    "toggle_disable": "关闭统计",
+    "toggle_enable": "开启统计"
+  },
+  "simulator": {
+    "title": "PaperFate 模拟器",
+    "submit_button": "运行预测",
+    "quick_check_button": "快速 Q 评分",
+    "loading": "预测中...",
+    "sample_load": "试用示例稿件",
+    "input_placeholder": "请将摘要粘贴到此处，PaperFate 会自动识别研究类型、样本量、领域和终点指标。",
+    "clear_button": "清空输入",
+    "history_button": "查看历史",
+    "abstract_label": "摘要",
+    "target_label": "目标期刊",
+    "authors_label": "作者",
+    "references_label": "参考文献",
+    "autodetect_active": "自动识别已启用",
+    "sample_section_title": "用示例快速体验",
+    "mode_hint": "贴上摘要，剩下的交给 PaperFate。"
+  },
+  "result": {
+    "degraded_banner": "LLM 评分当前不可用，仅显示基于规则的预测结果。Q 评分维度受限，请稍后重试。",
+    "run_inputs": "本次预测使用的输入",
+    "weakness_unavailable": "本次预测未提供评分结果",
+    "confidence_low": "置信度较低",
+    "confidence_med": "置信度中等",
+    "confidence_high": "置信度较高",
+    "similar_papers_title": "相似论文",
+    "target_journal_title": "目标期刊匹配度",
+    "bibliography_title": "参考文献检查",
+    "journey_title": "可能的投稿路径",
+    "weakness_title": "需要加强的方面",
+    "suggestions_title": "改进建议"
+  },
+  "compare": {
+    "title": "期刊比较",
+    "sample_load": "加载示例比较",
+    "submit_button": "比较期刊",
+    "side_a": "稿件 A",
+    "side_b": "稿件 B",
+    "label_input": "要比较的期刊（2–5 个，逗号或换行分隔）",
+    "error_no_input": "请至少输入 2 个期刊名称或 ISSN 进行比较。",
+    "error_too_many": "一次最多比较 5 个期刊，仅使用前 5 个。",
+    "error_network": "比较结果加载失败，请稍后再试。",
+    "clear_button": "清空输入",
+    "copy_to_clipboard": "复制比较结果",
+    "refresh_button": "刷新",
+    "sort_by_jif": "按 JIF 排序",
+    "sort_by_name": "按名称排序",
+    "no_results": "没有符合条件的期刊。",
+    "more_results": "查看更多",
+    "page_prev": "上一页",
+    "page_next": "下一页",
+    "columns": {
+      "publisher": "出版社",
+      "jif": "JIF",
+      "quartile": "JCR 分区",
+      "oa_status": "开放获取",
+      "apc": "APC (美元)",
+      "h_index": "h 指数",
+      "scope": "学科范围"
+    }
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "出现问题，请稍后再试。",
+    "retry": "重试",
+    "close": "关闭"
+  },
+  "history": {
+    "open": "打开历史",
+    "close": "关闭历史",
+    "restore": "恢复此次预测",
+    "copy_link": "复制链接",
+    "copied": "已复制",
+    "clear_all": "清空全部历史",
+    "clear_confirm": "确定要清空所有已保存的预测吗？此操作无法撤销。",
+    "no_entries": "尚未保存任何预测。",
+    "exported": "已导出为 JSON",
+    "favorite_on": "加入收藏",
+    "favorite_off": "取消收藏",
+    "add_tag": "添加标签",
+    "remove_tag": "删除标签",
+    "tag_placeholder": "输入标签后按回车"
+  },
+  "status": {
+    "page_title": "服务状态",
+    "refresh": "立即刷新",
+    "auto_refresh_on": "自动刷新已开启",
+    "auto_refresh_off": "自动刷新已关闭",
+    "endpoint_ok": "正常",
+    "endpoint_warn": "延迟",
+    "endpoint_fail": "故障"
+  },
+  "pwa": {
+    "update_available": "新版本已就绪。",
+    "reload": "重新加载",
+    "dismiss": "稍后",
+    "offline_title": "当前处于离线状态",
+    "offline_message": "请在恢复网络后再试。",
+    "retry": "重试"
+  },
+  "errors": {
+    "network": "请检查网络连接。",
+    "rate_limited": "请求过于频繁，请稍后再试。",
+    "payload_too_large": "输入内容过长，请缩短后再试。",
+    "request_timeout": "请求超时，请重试。",
+    "unknown": "发生未知错误。"
+  }
+}

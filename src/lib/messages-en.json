@@ -3,6 +3,8 @@
     "lang_label": "Language",
     "switch_to_ko": "한국어",
     "switch_to_en": "English",
+    "switch_to_zh": "中文",
+    "switch_to_ja": "日本語",
     "primary_navigation": "Primary navigation",
     "privacy_label": "Privacy settings"
   },

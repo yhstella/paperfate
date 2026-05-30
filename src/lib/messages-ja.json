@@ -1,0 +1,125 @@
+{
+  "nav": {
+    "lang_label": "言語",
+    "switch_to_ko": "한국어",
+    "switch_to_en": "English",
+    "switch_to_zh": "中文",
+    "switch_to_ja": "日本語",
+    "primary_navigation": "メインナビゲーション",
+    "privacy_label": "プライバシー設定"
+  },
+  "privacy": {
+    "telemetry_status_on": "匿名利用統計はオンになっています",
+    "telemetry_status_off": "匿名利用統計はオフになっています",
+    "telemetry_dnt_detected": "ブラウザの Do Not Track シグナルを検出したため、統計送信を停止しました。",
+    "telemetry_gpc_detected": "Global Privacy Control を検出したため、統計送信を停止しました。",
+    "toggle_disable": "統計をオフにする",
+    "toggle_enable": "統計をオンにする"
+  },
+  "simulator": {
+    "title": "PaperFate シミュレーター",
+    "submit_button": "予測を実行",
+    "quick_check_button": "Q ルーブリックを素早くチェック",
+    "loading": "予測中...",
+    "sample_load": "サンプル原稿で試す",
+    "input_placeholder": "ここに抄録を貼り付けてください。PaperFate が研究デザイン、サンプルサイズ、分野、エンドポイントを自動で抽出します。",
+    "clear_button": "入力をクリア",
+    "history_button": "履歴を見る",
+    "abstract_label": "抄録",
+    "target_label": "投稿先ジャーナル",
+    "authors_label": "著者",
+    "references_label": "参考文献",
+    "autodetect_active": "自動検出が有効です",
+    "sample_section_title": "サンプルで素早く確認",
+    "mode_hint": "抄録を貼り付ければ、残りは PaperFate が補います。"
+  },
+  "result": {
+    "degraded_banner": "現在 LLM 採点が利用できないため、ルールベースの予測のみを表示しています。Q ルーブリックのドメイン別スコアは制限されます。しばらくしてから再度お試しください。",
+    "run_inputs": "今回の予測に使用した入力",
+    "weakness_unavailable": "今回はルーブリック採点が提供されません",
+    "confidence_low": "信頼度: 低",
+    "confidence_med": "信頼度: 中",
+    "confidence_high": "信頼度: 高",
+    "similar_papers_title": "類似論文",
+    "target_journal_title": "投稿先ジャーナルとの適合度",
+    "bibliography_title": "参考文献チェック",
+    "journey_title": "想定される投稿ジャーニー",
+    "weakness_title": "強化すべきポイント",
+    "suggestions_title": "改善の提案"
+  },
+  "compare": {
+    "title": "ジャーナル比較",
+    "sample_load": "サンプル比較を読み込む",
+    "submit_button": "ジャーナルを比較",
+    "side_a": "原稿 A",
+    "side_b": "原稿 B",
+    "label_input": "比較するジャーナル（2〜5 件、カンマまたは改行区切り）",
+    "error_no_input": "比較するにはジャーナル名または ISSN を 2 件以上入力してください。",
+    "error_too_many": "一度に比較できるのは最大 5 件までです。先頭の 5 件のみ使用します。",
+    "error_network": "比較結果を取得できませんでした。しばらくしてから再度お試しください。",
+    "clear_button": "入力をクリア",
+    "copy_to_clipboard": "比較結果をコピー",
+    "refresh_button": "再読み込み",
+    "sort_by_jif": "JIF 順で並び替え",
+    "sort_by_name": "名前順で並び替え",
+    "no_results": "条件に一致するジャーナルはありません。",
+    "more_results": "もっと見る",
+    "page_prev": "前へ",
+    "page_next": "次へ",
+    "columns": {
+      "publisher": "出版社",
+      "jif": "JIF",
+      "quartile": "JCR クォータイル",
+      "oa_status": "オープンアクセス",
+      "apc": "APC (USD)",
+      "h_index": "h 指数",
+      "scope": "対象分野"
+    }
+  },
+  "common": {
+    "loading": "読み込み中...",
+    "error": "問題が発生しました。しばらくしてから再度お試しください。",
+    "retry": "再試行",
+    "close": "閉じる"
+  },
+  "history": {
+    "open": "履歴を開く",
+    "close": "履歴を閉じる",
+    "restore": "この予測を復元",
+    "copy_link": "リンクをコピー",
+    "copied": "コピーしました",
+    "clear_all": "履歴をすべて削除",
+    "clear_confirm": "保存された予測をすべて削除しますか？この操作は取り消せません。",
+    "no_entries": "まだ保存された予測はありません。",
+    "exported": "JSON として書き出しました",
+    "favorite_on": "お気に入りに追加",
+    "favorite_off": "お気に入りから削除",
+    "add_tag": "タグを追加",
+    "remove_tag": "タグを削除",
+    "tag_placeholder": "タグを入力して Enter"
+  },
+  "status": {
+    "page_title": "サービス状態",
+    "refresh": "今すぐ更新",
+    "auto_refresh_on": "自動更新オン",
+    "auto_refresh_off": "自動更新オフ",
+    "endpoint_ok": "正常",
+    "endpoint_warn": "遅延",
+    "endpoint_fail": "障害"
+  },
+  "pwa": {
+    "update_available": "新しいバージョンの準備ができました。",
+    "reload": "再読み込み",
+    "dismiss": "後で",
+    "offline_title": "オフラインです",
+    "offline_message": "ネットワークに再接続してから再度お試しください。",
+    "retry": "再試行"
+  },
+  "errors": {
+    "network": "ネットワーク接続を確認してください。",
+    "rate_limited": "リクエストが多すぎます。しばらくしてから再度お試しください。",
+    "payload_too_large": "入力が大きすぎます。短くしてください。",
+    "request_timeout": "リクエストがタイムアウトしました。再度お試しください。",
+    "unknown": "予期しないエラーが発生しました。"
+  }
+}

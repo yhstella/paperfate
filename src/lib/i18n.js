@@ -5,15 +5,19 @@
 //   - `vars` is an optional interpolation object, e.g. {n: 3} — any
 //     occurrence of `{n}` in the message string is replaced by String(n).
 //
-// Locale detection:
-//   - navigator.language.startsWith('ko') -> 'ko', else 'en'.
-//   - localStorage 'paperfate.locale' overrides the above (must be 'ko'
-//     or 'en' — anything else is ignored).
+// Supported locales: 'ko', 'en', 'zh', 'ja'.
+//
+// Locale detection priority:
+//   1. localStorage 'paperfate.locale' override (must be one of the
+//      supported codes — anything else is ignored).
+//   2. navigator.language prefix match — 'ko'->ko, 'zh'->zh, 'ja'->ja,
+//      otherwise 'en'.
+//   3. default 'en' fallback.
 //   - SSR safe: locale detection runs lazily on first t() call, not at
 //     module top, so importing this file never touches window/navigator.
 //
-// Fallback chain: ko -> en -> the raw key. Missing keys never throw;
-// they degrade to the english string, then to the key itself.
+// Fallback chain: <locale> -> en -> the raw key. Missing keys never
+// throw; they degrade to the english string, then to the key itself.
 //
 // Reactivity:
 //   - setLocale(locale) persists to localStorage and dispatches the
@@ -27,13 +31,39 @@
 import { useEffect, useState } from 'react'
 import koMessages from './messages-ko.json'
 import enMessages from './messages-en.json'
+import zhMessages from './messages-zh.json'
+import jaMessages from './messages-ja.json'
 
-const BUNDLES = { ko: koMessages, en: enMessages }
-const DEFAULT_LOCALE = 'ko'
+const BUNDLES = {
+  ko: koMessages,
+  en: enMessages,
+  zh: zhMessages,
+  ja: jaMessages,
+}
+export const SUPPORTED_LOCALES = ['ko', 'en', 'zh', 'ja']
+const SUPPORTED_SET = new Set(SUPPORTED_LOCALES)
+const DEFAULT_LOCALE = 'en'
 const STORAGE_KEY = 'paperfate.locale'
 const EVENT_NAME = 'paperfate:locale-changed'
 
 let cachedLocale = null
+
+function isSupported(locale) {
+  return typeof locale === 'string' && SUPPORTED_SET.has(locale)
+}
+
+function detectFromNavigator() {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.language === 'string') {
+      const lang = navigator.language.toLowerCase()
+      if (lang.startsWith('ko')) return 'ko'
+      if (lang.startsWith('zh')) return 'zh'
+      if (lang.startsWith('ja')) return 'ja'
+      if (lang.startsWith('en')) return 'en'
+    }
+  } catch { /* ignore */ }
+  return null
+}
 
 function detectLocale() {
   // SSR / non-browser: just return the default.
@@ -43,17 +73,13 @@ function detectLocale() {
   try {
     if (typeof localStorage !== 'undefined') {
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored === 'ko' || stored === 'en') return stored
+      if (isSupported(stored)) return stored
     }
   } catch { /* private mode etc. — ignore */ }
 
   // navigator.language sniff.
-  try {
-    if (typeof navigator !== 'undefined' && typeof navigator.language === 'string') {
-      if (navigator.language.toLowerCase().startsWith('ko')) return 'ko'
-      return 'en'
-    }
-  } catch { /* ignore */ }
+  const nav = detectFromNavigator()
+  if (nav) return nav
 
   return DEFAULT_LOCALE
 }
@@ -65,7 +91,7 @@ export function getLocale() {
 }
 
 export function setLocale(locale) {
-  if (locale !== 'ko' && locale !== 'en') return
+  if (!isSupported(locale)) return
   cachedLocale = locale
 
   // Persist (best-effort).
