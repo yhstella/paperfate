@@ -3,6 +3,7 @@ const CACHE_NAME = 'paperfate-shell-v1';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
+  '/offline.html',
   '/og-default.svg',
   '/manifest.webmanifest'
 ];
@@ -86,6 +87,8 @@ self.addEventListener('fetch', (event) => {
           const cached = await caches.match(request);
           if (cached) return cached;
           if (isHtml) {
+            const offline = await caches.match('/offline.html');
+            if (offline) return offline;
             const fallback = await caches.match('/index.html');
             if (fallback) return fallback;
           }
@@ -115,4 +118,11 @@ self.addEventListener('fetch', (event) => {
       }
     })()
   );
+});
+
+// Allow the page to tell the waiting worker to take over immediately.
+self.addEventListener('message', (event) => {
+  if (event && event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
