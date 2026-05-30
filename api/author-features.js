@@ -27,13 +27,14 @@ const PARALLEL = 5
 const MAILTO = process.env.PAPERFATE_OPENALEX_MAILTO || 'beta@paperfate.com'
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
+  const h = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   }
+  if (allow) h['Access-Control-Allow-Origin'] = allow
+  return h
 }
 
 function bad(res, status, error, detail) {
@@ -68,13 +69,16 @@ async function lookupAuthor(name) {
     const top = json?.results?.[0]
     if (!top) return null
     const h = top.summary_stats?.h_index
-    return {
+    const inst = Array.isArray(top.last_known_institutions) ? top.last_known_institutions[0] : null
+    const out = {
       name: q,
       matched: top.display_name || null,
       h_index: Number.isFinite(+h) ? +h : null,
       works_count: top.works_count ?? null,
       openalex_id: top.id || null,
     }
+    if (inst?.display_name) out.institution = inst.display_name
+    return out
   } catch { clearTimeout(timer); return null }
 }
 
@@ -113,15 +117,21 @@ export default async function handler(req, res) {
 
   const hits = resolved.filter(r => r && Number.isFinite(r.h_index))
   const hs = hits.map(r => r.h_index)
+  const isSingleAuthor = names.length === 1
   const firstH = resolved[0] && Number.isFinite(resolved[0].h_index) ? resolved[0].h_index : null
-  const lastH = resolved.length > 1
-    ? (resolved[resolved.length - 1] && Number.isFinite(resolved[resolved.length - 1].h_index)
-        ? resolved[resolved.length - 1].h_index : null)
-    : firstH
+  // Per Codex Round 7 spec: with a single author, last_author_h_index is null
+  // (there is no separate senior position). Multi-author cases keep the
+  // standard "h-index of the trailing author" semantics.
+  const lastH = isSingleAuthor
+    ? null
+    : (resolved[resolved.length - 1] && Number.isFinite(resolved[resolved.length - 1].h_index)
+        ? resolved[resolved.length - 1].h_index
+        : null)
 
   return res.status(200).json({
     first_author_h_index: firstH,
     last_author_h_index: lastH,
+    single_author: isSingleAuthor,
     max_team_h_index: hs.length ? Math.max(...hs) : null,
     median_team_h_index: hs.length ? Math.round(median(hs)) : null,
     team_size_with_id: hits.length,

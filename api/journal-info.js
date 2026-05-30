@@ -30,13 +30,14 @@ const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paper
   .split(',').map(s => s.trim())
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
+  const h = {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   }
+  if (allow) h['Access-Control-Allow-Origin'] = allow
+  return h
 }
 
 let _journals = null
@@ -84,25 +85,42 @@ export default function handler(req, res) {
 
   const journals = loadJournals()
   let hit = null
+  let match_type = null
+  let match_score = 0
 
   if (issnRaw) {
     const want = normalizeIssn(issnRaw)
     hit = journals.find(j => normalizeIssn(j.issn) === want) || null
+    if (hit) { match_type = 'exact'; match_score = 1000 }
   }
   if (!hit && nameRaw) {
     const wantLower = String(nameRaw).trim().toLowerCase()
     if (wantLower.length >= 3) {
       const exact = journals.find(j => String(j.name || '').toLowerCase() === wantLower)
-      if (exact) hit = exact
+      if (exact) { hit = exact; match_type = 'exact'; match_score = 1000 }
       else {
-        const matches = journals
-          .filter(j => String(j.name || '').toLowerCase().includes(wantLower))
+        const startsWith = journals
+          .filter(j => String(j.name || '').toLowerCase().startsWith(wantLower))
           .sort((a, b) => (+(b.jif || 0)) - (+(a.jif || 0)))
-        hit = matches[0] || null
+        if (startsWith.length) {
+          hit = startsWith[0]
+          match_type = 'startsWith'
+          match_score = 700
+        } else if (wantLower.length >= 6) {
+          const matches = journals
+            .filter(j => String(j.name || '').toLowerCase().includes(wantLower))
+            .sort((a, b) => (+(b.jif || 0)) - (+(a.jif || 0)))
+          if (matches.length) {
+            hit = matches[0]
+            match_type = 'substring'
+            match_score = 500
+          }
+        }
       }
     }
   }
 
   if (!hit) return res.status(404).json({ error: 'journal_not_found', query: { issn: issnRaw, name: nameRaw } })
-  return res.status(200).json({ journal: shape(hit) })
+  res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800')
+  return res.status(200).json({ journal: shape(hit), match_type, match_score })
 }

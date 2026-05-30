@@ -19,13 +19,23 @@ const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paper
   .split(',').map(s => s.trim())
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
+  const h = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   }
+  if (allow) h['Access-Control-Allow-Origin'] = allow
+  return h
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+function retryDelayMs(headers) {
+  const ra = headers && typeof headers.get === 'function' ? headers.get('retry-after') : null
+  const n = ra ? parseInt(ra, 10) : NaN
+  const ms = Number.isFinite(n) && n > 0 ? n * 1000 : 1500
+  return Math.min(ms, 4000)
 }
 
 function bad(res, status, error, detail) {
@@ -62,34 +72,49 @@ function normalizeTitle(s) {
 
 function buildQuery(title, abstract) {
   const t = String(title || '').trim()
-  const a = String(abstract || '').trim().split(/\s+/).slice(0, 25).join(' ')
+  const cleaned = String(abstract || '').replace(/\b(Background|Methods|Results|Conclusions|Objective|Aim|Setting|Design|Participants|Interventions|Findings)\s*:/gi, ' ')
+  const a = cleaned.trim().split(/\s+/).slice(0, 25).join(' ')
   const q = [t, a].filter(Boolean).join(' ').slice(0, 400)
   return q
 }
 
-async function searchOpenAlex(query, mailto, limit = 10) {
+async function searchOpenAlex(query, mailto, limit = 10, deadline = Infinity) {
   const url = new URL('https://api.openalex.org/works')
   url.searchParams.set('search', query)
   url.searchParams.set('per-page', String(limit))
   url.searchParams.set('select', 'id,doi,title,publication_year,cited_by_count,primary_location,relevance_score')
   url.searchParams.set('mailto', mailto)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
-  try {
-    const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${mailto})` }, signal: controller.signal })
-    clearTimeout(timer)
-    if (!r.ok) throw new Error(`openalex ${r.status}`)
-    return await r.json()
-  } catch (e) {
-    clearTimeout(timer)
-    throw e
+  let lastErr = null
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${mailto})` }, signal: controller.signal })
+      clearTimeout(timer)
+      if ((r.status === 429 || r.status === 503) && attempt === 0) {
+        const delay = retryDelayMs(r.headers)
+        if (Date.now() + delay < deadline) {
+          await sleep(delay)
+          continue
+        }
+      }
+      if (!r.ok) throw new Error(`openalex ${r.status}`)
+      return await r.json()
+    } catch (e) {
+      clearTimeout(timer)
+      lastErr = e
+      // Only retry on the 429/503 path (handled above via continue);
+      // other errors (timeout, network, non-retriable HTTP) propagate.
+      throw e
+    }
   }
+  throw lastErr || new Error('openalex search failed')
 }
 
 // Title-only search ranks landmark papers higher than reviews citing them.
 // Used in parallel with the abstract-text search so we always cover the
 // originating paper when the title alone is distinctive.
-async function searchOpenAlexTitle(title, mailto, limit = 6) {
+async function searchOpenAlexTitle(title, mailto, limit = 6, deadline = Infinity) {
   const url = new URL('https://api.openalex.org/works')
   url.searchParams.set('search', String(title || '').slice(0, 200))
   url.searchParams.set('per-page', String(limit))
@@ -99,14 +124,24 @@ async function searchOpenAlexTitle(title, mailto, limit = 6) {
   // alone is enough to surface them when the title is distinctive.
   url.searchParams.set('sort', 'relevance_score:desc')
   url.searchParams.set('mailto', mailto)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
-  try {
-    const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${mailto})` }, signal: controller.signal })
-    clearTimeout(timer)
-    if (!r.ok) return null
-    return await r.json()
-  } catch { clearTimeout(timer); return null }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${mailto})` }, signal: controller.signal })
+      clearTimeout(timer)
+      if ((r.status === 429 || r.status === 503) && attempt === 0) {
+        const delay = retryDelayMs(r.headers)
+        if (Date.now() + delay < deadline) {
+          await sleep(delay)
+          continue
+        }
+      }
+      if (!r.ok) return null
+      return await r.json()
+    } catch { clearTimeout(timer); return null }
+  }
+  return null
 }
 
 function shapeResult(work, issnIndex) {
@@ -122,6 +157,7 @@ function shapeResult(work, issnIndex) {
     venue,
     issn: issnL,
     if: jif,
+    jif,
     year: work.publication_year || null,
     citations: work.cited_by_count ?? 0,
     doi,
@@ -153,9 +189,10 @@ export default async function handler(req, res) {
   // The title query reliably surfaces landmark papers ranked above reviews
   // citing them; the abstract-text query catches papers without exact title
   // overlap. We interleave by relevance and dedup by normalised title.
+  const deadline = Date.now() + 22000
   const [raw, titleHit] = await Promise.all([
-    searchOpenAlex(query, mailto, 10).catch(e => { return { _error: String(e.message || e) } }),
-    searchOpenAlexTitle(title, mailto, 6),
+    searchOpenAlex(query, mailto, 10, deadline).catch(e => { return { _error: String(e.message || e) } }),
+    searchOpenAlexTitle(title, mailto, 6, deadline),
   ])
   if (raw?._error && !titleHit) {
     return bad(res, 502, 'openalex_search_failed', raw._error)

@@ -36,13 +36,45 @@ const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paper
   .split(',').map(s => s.trim())
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
+  const h = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   }
+  if (allow) h['Access-Control-Allow-Origin'] = allow
+  return h
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+function retryDelayMs(headers) {
+  const ra = headers && typeof headers.get === 'function' ? headers.get('retry-after') : null
+  const n = ra ? parseInt(ra, 10) : NaN
+  const ms = Number.isFinite(n) && n > 0 ? n * 1000 : 1500
+  return Math.min(ms, 4000)
+}
+
+// Publisher sanity checks keyed by DOI prefix. If a DOI says it's NEJM but
+// OpenAlex returns a different venue (or vice versa), the metadata is stale
+// or wrong — drop the venue/issn/jif so we don't report a wrong tier.
+const DOI_VENUE_RULES = [
+  { doi: /^10\.1056\/nejm/i,            venue: /new england|nejm/i },
+  { doi: /^10\.1016\/s0140-6736/i,      venue: /lancet/i },
+  { doi: /^10\.1001\/jama/i,            venue: /jama/i },
+  { doi: /^10\.1038\/(nature|s41586)/i, venue: /nature/i },
+  { doi: /^10\.1126\/science/i,         venue: /science/i },
+]
+
+function venueMismatchForDoi(doi, venue) {
+  if (!doi) return false
+  for (const rule of DOI_VENUE_RULES) {
+    if (rule.doi.test(doi)) {
+      if (!venue || !rule.venue.test(String(venue))) return true
+      return false
+    }
+  }
+  return false
 }
 
 function bad(res, status, error, detail) {
@@ -77,17 +109,31 @@ function normalizeDoi(s) {
   return String(s || '').trim().toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '').replace(/^doi:\s*/, '')
 }
 
+// fetchOpenAlex: returns {ok:true, w} on success, {ok:false, code} on failure.
+// code ∈ '404' | 'timeout' | 'aborted' | 'http_<status>' | 'http_500' | 'network'
 async function fetchOpenAlex(doi) {
   const url = `https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?select=id,doi,title,publication_year,cited_by_count,primary_location&mailto=${MAILTO}`
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 8000)
-  try {
-    const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${MAILTO})` }, signal: ctrl.signal })
-    clearTimeout(timer)
-    if (r.status === 404) return null
-    if (!r.ok) throw new Error(`openalex ${r.status}`)
-    return await r.json()
-  } catch { clearTimeout(timer); return null }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': `paperfate/0.3 (mailto:${MAILTO})` }, signal: ctrl.signal })
+      clearTimeout(timer)
+      if (r.status === 429 && attempt === 0) {
+        await sleep(retryDelayMs(r.headers))
+        continue
+      }
+      if (r.status === 404) return { ok: false, code: '404' }
+      if (!r.ok) return { ok: false, code: `http_${r.status}` }
+      const w = await r.json()
+      return { ok: true, w }
+    } catch (e) {
+      clearTimeout(timer)
+      const code = e && e.name === 'AbortError' ? 'timeout' : 'network'
+      return { ok: false, code }
+    }
+  }
+  return { ok: false, code: 'network' }
 }
 
 function shapeWork(w, issnIndex) {
@@ -145,12 +191,29 @@ export default async function handler(req, res) {
   // Parallel-pool OpenAlex lookups, PARALLEL at a time
   const out = []
   let cursor = 0
+  let nNotFound = 0
+  let nLookupErrors = 0
+  let nVenueMismatch = 0
   async function worker() {
     while (cursor < dois.length) {
       const idx = cursor++
       const doi = dois[idx]
-      const w = await fetchOpenAlex(doi)
-      out[idx] = w ? shapeWork(w, issnIndex) : { doi, _missing: true }
+      const r = await fetchOpenAlex(doi)
+      if (r.ok) {
+        const shaped = shapeWork(r.w, issnIndex)
+        if (shaped && venueMismatchForDoi(shaped.doi || doi, shaped.venue)) {
+          nVenueMismatch++
+          shaped.venue = null
+          shaped.issn = null
+          shaped.jif = null
+          shaped.warning = 'doi_metadata_mismatch'
+        }
+        out[idx] = shaped
+      } else {
+        if (r.code === '404') nNotFound++
+        else nLookupErrors++
+        out[idx] = { doi, _missing: true, error_code: r.code }
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(PARALLEL, dois.length) }, () => worker()))
@@ -164,6 +227,9 @@ export default async function handler(req, res) {
     n_input: dois.length,
     n_resolved: resolved.length,
     n_with_jif: withJif.length,
+    n_not_found: nNotFound,
+    n_lookup_errors: nLookupErrors,
+    n_venue_mismatch: nVenueMismatch,
     mean_jif: jifs.length ? +(jifs.reduce((a, b) => a + b, 0) / jifs.length).toFixed(2) : null,
     median_jif: jifs.length ? +median(jifs).toFixed(2) : null,
     top_journals: topCounts(resolved, 'venue').map(([name, count]) => {

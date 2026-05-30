@@ -23,13 +23,14 @@ const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paper
   .split(',').map(s => s.trim())
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
+  const h = {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   }
+  if (allow) h['Access-Control-Allow-Origin'] = allow
+  return h
 }
 
 let _journals = null
@@ -78,18 +79,60 @@ export default function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
   const qRaw = String(url.searchParams.get('q') || '').trim()
   const limit = Math.min(20, Math.max(1, Number(url.searchParams.get('limit') || 10)))
-  if (!qRaw || qRaw.length < 2) return res.status(200).json({ results: [] })
+  const tierFilter = String(url.searchParams.get('tier') || '').trim().toUpperCase()
+  if (!qRaw || qRaw.length < 2) {
+    res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800')
+    return res.status(200).json({ results: [] })
+  }
 
   const qLower = qRaw.toLowerCase()
   const journals = loadJournals()
   const scored = []
   for (const j of journals) {
+    if (tierFilter && String(j.tier || '').toUpperCase() !== tierFilter) continue
     const s = rank(j, qLower, qRaw)
     if (s > 0) scored.push({ ...j, _score: s })
   }
   scored.sort((a, b) => b._score - a._score)
-  const out = scored.slice(0, limit).map(j => ({
+
+  // Tier blending: take top 7 by raw score, then reserve up to 3 slots for
+  // Q2/Q3 journals (above the min top-7 score) so users see realistic mid-tier
+  // targets alongside flagship matches.
+  let chosen
+  if (tierFilter || scored.length <= limit) {
+    chosen = scored.slice(0, limit)
+  } else {
+    const top = scored.slice(0, Math.min(7, limit))
+    const seen = new Set(top.map(j => j.issn || j.name))
+    const minScore = top.length ? top[top.length - 1]._score : 0
+    const midSlots = Math.max(0, limit - top.length)
+    const mid = []
+    for (const j of scored) {
+      if (mid.length >= midSlots) break
+      const key = j.issn || j.name
+      if (seen.has(key)) continue
+      const q = String(j.tier || '').toUpperCase()
+      if ((q === 'Q2' || q === 'Q3') && j._score >= minScore) {
+        mid.push(j)
+        seen.add(key)
+      }
+    }
+    chosen = [...top, ...mid]
+    // Fill remainder with next-highest unseen by score if mid pool ran short.
+    if (chosen.length < limit) {
+      for (const j of scored) {
+        if (chosen.length >= limit) break
+        const key = j.issn || j.name
+        if (seen.has(key)) continue
+        chosen.push(j)
+        seen.add(key)
+      }
+    }
+  }
+
+  const out = chosen.map(j => ({
     name: j.name, issn: j.issn, jif: j.jif, tier: j.tier, category: j.category, publisher: j.publisher, is_oa: j.is_oa,
   }))
+  res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800')
   return res.status(200).json({ results: out })
 }
