@@ -5,15 +5,21 @@ import { t } from '../lib/i18n.js'
 const ISSN_RE = /^\d{4}-\d{3}[\dxX]$/
 const PLACEHOLDER = 'NEJM, Lancet, JAMA, Annals of Internal Medicine'
 
+// Draft persistence — mirrors Simulator's localStorage strategy.
+const DRAFT_KEY = 'paperfate.compare.draft'
+const DRAFT_MAX_AGE_MS = 10 * 60 * 1000      // 10 minutes
+const DRAFT_MAX_BYTES = 50 * 1024            // 50KB
+const DRAFT_DEBOUNCE_MS = 1000
+
 const ROWS = [
-  { key: 'name',          label: 'Journal name' },
-  { key: 'publisher',     label: 'Publisher' },
-  { key: 'jif',           label: 'JIF',                       fmt: fmtNumber },
-  { key: 'jcr_quartile',  label: 'JCR quartile' },
-  { key: 'oa_status',     label: 'Open access' },
-  { key: 'apc_usd',       label: 'APC (USD)',                 fmt: fmtMoney },
-  { key: 'h_index',       label: 'h-index',                   fmt: fmtInt },
-  { key: 'scope',         label: 'Scope' },
+  { key: 'name',          labelKey: null,                      label: 'Journal name' },
+  { key: 'publisher',     labelKey: 'compare.columns.publisher' },
+  { key: 'jif',           labelKey: 'compare.columns.jif',           fmt: fmtNumber },
+  { key: 'jcr_quartile',  labelKey: 'compare.columns.quartile' },
+  { key: 'oa_status',     labelKey: 'compare.columns.oa_status' },
+  { key: 'apc_usd',       labelKey: 'compare.columns.apc',           fmt: fmtMoney },
+  { key: 'h_index',       labelKey: 'compare.columns.h_index',       fmt: fmtInt },
+  { key: 'scope',         labelKey: 'compare.columns.scope' },
 ]
 
 function fmtNumber(v) {
@@ -49,21 +55,103 @@ function splitEntries(raw) {
   return { issns, names }
 }
 
+// --- Draft persistence helpers (SSR safe, never throw to caller) ---
+function readDraft() {
+  if (typeof window === 'undefined') return null
+  try {
+    if (typeof localStorage === 'undefined') return null
+    const blob = localStorage.getItem(DRAFT_KEY)
+    if (!blob) return null
+    const parsed = JSON.parse(blob)
+    if (!parsed || typeof parsed !== 'object') return null
+    const ts = Number(parsed.ts)
+    const raw = typeof parsed.raw === 'string' ? parsed.raw : ''
+    if (!Number.isFinite(ts) || !raw) return null
+    if (Date.now() - ts > DRAFT_MAX_AGE_MS) return null
+    return { ts, raw }
+  } catch { return null }
+}
+
+function writeDraft(raw) {
+  if (typeof window === 'undefined') return
+  if (typeof raw !== 'string') return
+  // Skip oversized values; UTF-16 byte estimate ~= length * 2 but we use
+  // raw byte size via TextEncoder when available for fidelity.
+  let size
+  try {
+    if (typeof TextEncoder !== 'undefined') {
+      size = new TextEncoder().encode(raw).length
+    } else {
+      size = raw.length * 2
+    }
+  } catch { size = raw.length * 2 }
+  if (size > DRAFT_MAX_BYTES) return
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), raw }))
+  } catch { /* quota / private mode — ignore */ }
+}
+
+function clearDraft() {
+  if (typeof window === 'undefined') return
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.removeItem(DRAFT_KEY)
+  } catch { /* ignore */ }
+}
+
 export default function Compare() {
   const [raw, setRaw] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
   const formRef = useRef(null)
+  const saveTimerRef = useRef(null)
+  const rehydratedRef = useRef(false)
 
   const parsed = useMemo(() => splitEntries(raw), [raw])
   const tokenCount = parsed.issns.length + parsed.names.length
   const canSubmit = tokenCount >= 2 && tokenCount <= 5 && status !== 'loading'
 
-  // Fire compare_open exactly once on mount.
+  // Fire compare_open exactly once on mount + rehydrate any fresh draft.
   useEffect(() => {
     trackEvent('compare_open')
+    const draft = readDraft()
+    if (draft && draft.raw) {
+      rehydratedRef.current = true
+      setRaw(draft.raw)
+    }
   }, [])
+
+  // Debounced 1s save on textarea change. Cleared after submit / Clear.
+  useEffect(() => {
+    // Skip the very first sync after rehydration so we don't immediately
+    // rewrite the same blob with a fresh timestamp.
+    if (rehydratedRef.current) {
+      rehydratedRef.current = false
+      return
+    }
+    if (typeof window === 'undefined') return undefined
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (!raw) {
+      // Empty value → wipe (don't persist empty drafts).
+      clearDraft()
+      return undefined
+    }
+    saveTimerRef.current = setTimeout(() => {
+      writeDraft(raw)
+      saveTimerRef.current = null
+    }, DRAFT_DEBOUNCE_MS)
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [raw])
 
   async function onSubmit(e) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault()
@@ -103,10 +191,12 @@ export default function Compare() {
       })
       setData(journals)
       setStatus('done')
+      // Successful comparison → wipe draft.
+      clearDraft()
     } catch (err) {
       const code = (err && err.__status != null) ? err.__status : 'network_error'
       trackEvent('compare_result_error', { http_status_or_code: code })
-      setError(err.message || 'Comparison failed')
+      setError(err.message || t('compare.error_network'))
       setStatus('error')
     }
   }
@@ -114,6 +204,15 @@ export default function Compare() {
   function loadSample() {
     trackEvent('compare_sample_load')
     setRaw(PLACEHOLDER)
+  }
+
+  function onClearClick() {
+    setRaw('')
+    setData(null)
+    setError(null)
+    setStatus('idle')
+    clearDraft()
+    trackEvent('compare_clear')
   }
 
   function onTextareaKeyDown(e) {
@@ -127,6 +226,7 @@ export default function Compare() {
     if (e.key === 'Escape') {
       e.preventDefault()
       setRaw('')
+      clearDraft()
     }
   }
 
@@ -158,7 +258,7 @@ export default function Compare() {
             <label className="block" htmlFor="compare-journals-input">
               <div className="mb-1.5 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Journals (2–5, comma or newline)
+                  {t('compare.label_input')}
                 </span>
                 <span className="text-[11px] text-slate-500" aria-hidden="true">
                   {tokenCount}/5 · {parsed.issns.length} ISSN · {parsed.names.length} name
@@ -171,7 +271,7 @@ export default function Compare() {
                 onKeyDown={onTextareaKeyDown}
                 rows={3}
                 placeholder={PLACEHOLDER}
-                aria-label="Journals to compare — enter 2 to 5 names or ISSNs separated by comma or newline. Press Ctrl+Enter to submit, Escape to clear."
+                aria-label={t('compare.label_input')}
                 aria-describedby="compare-token-summary compare-input-hint"
                 className="input resize-y leading-relaxed"
               />
@@ -199,24 +299,36 @@ export default function Compare() {
               <div id="compare-input-hint" className="text-[11px] text-slate-500">
                 Matches /\d{'{4}'}-\d{'{3}'}[\dxX]/ go to ISSN lookup. Everything else is name-matched.
               </div>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                aria-label="Compare selected journals"
-                className="btn-primary shrink-0"
-              >
-                {status === 'loading' ? 'Comparing…' : t('compare.submit_button')}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {raw && (
+                  <button
+                    type="button"
+                    onClick={onClearClick}
+                    aria-label={t('compare.clear_button')}
+                    className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
+                  >
+                    {t('compare.clear_button')}
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  aria-label={t('compare.submit_button')}
+                  className="btn-primary"
+                >
+                  {status === 'loading' ? 'Comparing…' : t('compare.submit_button')}
+                </button>
+              </div>
             </div>
 
             {tokenCount > 0 && tokenCount < 2 && (
               <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200">
-                Add at least one more journal — comparisons need 2 entries minimum.
+                {t('compare.error_no_input')}
               </div>
             )}
             {tokenCount > 5 && (
               <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200">
-                Only the first 5 entries will be used.
+                {t('compare.error_too_many')}
               </div>
             )}
           </div>
@@ -231,8 +343,18 @@ export default function Compare() {
             aria-live="assertive"
             className="card p-6 text-sm text-amber-200"
           >
-            <div className="font-semibold mb-1">Comparison failed</div>
+            <div className="font-semibold mb-1">{t('compare.error_network')}</div>
             <div className="text-amber-200 text-[13px]">{error}</div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={onSubmit}
+                disabled={!canSubmit}
+                className="rounded-md border border-amber-300/30 bg-amber-300/[0.06] px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-300/[0.12] transition-colors disabled:opacity-50"
+              >
+                {t('compare.refresh_button')}
+              </button>
+            </div>
           </div>
         )}
         {status === 'done' && data && data.length > 0 && (
@@ -279,29 +401,32 @@ function CompareTable({ journals }) {
           </tr>
         </thead>
         <tbody>
-          {ROWS.map(row => (
-            <tr key={row.key} className="hover:bg-white/[0.02]">
-              <th
-                scope="row"
-                className="sticky left-0 bg-ink-800/80 backdrop-blur-sm align-top px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-white/5"
-              >
-                {row.label}
-              </th>
-              {journals.map((j, i) => {
-                const raw = j?.[row.key]
-                const value = row.fmt ? row.fmt(raw) : (raw == null || raw === '' ? '—' : String(raw))
-                const isMissing = value === '—'
-                return (
-                  <td
-                    key={`${row.key}-${i}`}
-                    className={`align-top px-3 py-2 border-b border-white/5 ${isMissing ? 'text-slate-500' : 'text-slate-200'} ${row.key === 'scope' ? 'text-[12px] leading-relaxed' : ''}`}
-                  >
-                    {value}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
+          {ROWS.map(row => {
+            const label = row.labelKey ? t(row.labelKey) : row.label
+            return (
+              <tr key={row.key} className="hover:bg-white/[0.02]">
+                <th
+                  scope="row"
+                  className="sticky left-0 bg-ink-800/80 backdrop-blur-sm align-top px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-white/5"
+                >
+                  {label}
+                </th>
+                {journals.map((j, i) => {
+                  const raw = j?.[row.key]
+                  const value = row.fmt ? row.fmt(raw) : (raw == null || raw === '' ? '—' : String(raw))
+                  const isMissing = value === '—'
+                  return (
+                    <td
+                      key={`${row.key}-${i}`}
+                      className={`align-top px-3 py-2 border-b border-white/5 ${isMissing ? 'text-slate-500' : 'text-slate-200'} ${row.key === 'scope' ? 'text-[12px] leading-relaxed' : ''}`}
+                    >
+                      {value}
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
       <div className="mt-3 text-[11px] text-slate-500">

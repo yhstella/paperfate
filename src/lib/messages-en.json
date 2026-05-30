@@ -19,11 +19,27 @@
     "weakness_unavailable": "Rubric scoring unavailable for this run"
   },
   "compare": {
-    "title": "Compare manuscripts",
+    "title": "Compare journals",
     "sample_load": "Load sample comparison",
-    "submit_button": "Compare both",
+    "submit_button": "Compare journals",
     "side_a": "Manuscript A",
-    "side_b": "Manuscript B"
+    "side_b": "Manuscript B",
+    "label_input": "Journals to compare (2–5, comma or newline)",
+    "error_no_input": "Enter at least 2 journal names or ISSNs to compare.",
+    "error_too_many": "Up to 5 journals at a time. Only the first 5 entries will be used.",
+    "error_network": "We couldn't load the comparison. Please try again in a moment.",
+    "clear_button": "Clear input",
+    "copy_to_clipboard": "Copy comparison",
+    "refresh_button": "Refresh",
+    "columns": {
+      "publisher": "Publisher",
+      "jif": "JIF",
+      "quartile": "JCR quartile",
+      "oa_status": "Open access",
+      "apc": "APC (USD)",
+      "h_index": "h-index",
+      "scope": "Scope"
+    }
   },
   "common": {
     "loading": "Loading...",

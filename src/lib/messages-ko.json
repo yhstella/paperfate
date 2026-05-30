@@ -19,11 +19,27 @@
     "weakness_unavailable": "이번 실행에서는 루브릭 채점이 제공되지 않습니다"
   },
   "compare": {
-    "title": "원고 비교",
+    "title": "저널 비교",
     "sample_load": "샘플 비교 불러오기",
-    "submit_button": "두 원고 비교",
+    "submit_button": "저널 비교",
     "side_a": "원고 A",
-    "side_b": "원고 B"
+    "side_b": "원고 B",
+    "label_input": "비교할 저널 (2~5개, 쉼표 또는 줄바꿈으로 구분)",
+    "error_no_input": "비교하려면 최소 2개의 저널 이름이나 ISSN을 입력해 주세요.",
+    "error_too_many": "한 번에 최대 5개까지만 비교할 수 있습니다. 앞 5개만 사용됩니다.",
+    "error_network": "비교 결과를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "clear_button": "입력 지우기",
+    "copy_to_clipboard": "비교 결과 복사",
+    "refresh_button": "다시 불러오기",
+    "columns": {
+      "publisher": "출판사",
+      "jif": "JIF",
+      "quartile": "JCR 분위",
+      "oa_status": "오픈 액세스",
+      "apc": "APC (USD)",
+      "h_index": "h-지수",
+      "scope": "분야 스코프"
+    }
   },
   "common": {
     "loading": "불러오는 중...",
