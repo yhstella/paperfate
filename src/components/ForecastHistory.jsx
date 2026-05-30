@@ -9,6 +9,7 @@ import {
   addTag,
   removeTag,
   exportAsJson,
+  exportAsCsv,
 } from '../lib/forecastHistory.js'
 import { shareForecast, canShareForecast } from '../lib/shareForecast.js'
 import ForecastCompare from './ForecastCompare.jsx'
@@ -250,6 +251,30 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
     }
   }
 
+  function handleExportCsv() {
+    if (typeof window === 'undefined') return
+    let csv = ''
+    try { csv = exportAsCsv() } catch { csv = '' }
+    if (!csv) return
+    try { trackEvent('history_export_csv', { count: entries.length }) } catch { /* ignore */ }
+    try {
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `paperfate-history-${stamp}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url) } catch { /* ignore */ }
+      }, 1000)
+    } catch {
+      // Blob / anchor not available — best-effort silent fail.
+    }
+  }
+
   if (!open) return null
 
   return (
@@ -287,6 +312,17 @@ export default function ForecastHistory({ open, onClose, onRestore }) {
                 className="text-[11px] text-slate-300 hover:text-slate-100 px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
               >
                 {t('history.exported')}
+              </button>
+            )}
+            {hasEntries && (
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                aria-label="Export CSV"
+                title="Export CSV"
+                className="text-[11px] text-slate-300 hover:text-slate-100 px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
+              >
+                Export CSV
               </button>
             )}
             <button

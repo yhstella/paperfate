@@ -276,3 +276,63 @@ export function exportAsJson() {
     return '{"exported_at":null,"entries":[]}'
   }
 }
+
+// RFC 4180 field escape: wrap in double quotes if the value contains
+// comma, quote, CR, or LF. Embedded double quotes are doubled.
+function csvEscape(value) {
+  if (value === null || value === undefined) return ''
+  const s = String(value)
+  if (s === '') return ''
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
+// Returns a CSV string of all entries: a header row plus one row per
+// entry. Columns: id, ts (ISO), title, mode, extractor_used,
+// predicted_jif, request_id, wall_ms, favorite (true/false), tags
+// (semicolon-joined). RFC 4180 escaping. CRLF line endings.
+export function exportAsCsv() {
+  const header = [
+    'id',
+    'ts',
+    'title',
+    'mode',
+    'extractor_used',
+    'predicted_jif',
+    'request_id',
+    'wall_ms',
+    'favorite',
+    'tags',
+  ].join(',')
+  if (!hasWindow()) return header + '\r\n'
+  try {
+    const store = readStore()
+    const entries = (Array.isArray(store.entries) ? store.entries : []).map(withTagsShape)
+    const rows = entries.map(e => {
+      const tsIso = Number.isFinite(+e.ts)
+        ? (() => { try { return new Date(+e.ts).toISOString() } catch { return '' } })()
+        : ''
+      const jifPoint = e?.predictions?.jcr_jif?.point
+      const predictedJif = Number.isFinite(+jifPoint) ? String(+jifPoint) : ''
+      const wallMs = Number.isFinite(+e.wall_ms) ? String(+e.wall_ms) : ''
+      const tagsStr = Array.isArray(e.tags) ? e.tags.join(';') : ''
+      return [
+        csvEscape(e.id || ''),
+        csvEscape(tsIso),
+        csvEscape(e.title || ''),
+        csvEscape(e.mode || ''),
+        csvEscape(e.extractor_used || ''),
+        csvEscape(predictedJif),
+        csvEscape(e.request_id || ''),
+        csvEscape(wallMs),
+        csvEscape(e.favorite === true ? 'true' : 'false'),
+        csvEscape(tagsStr),
+      ].join(',')
+    })
+    return [header, ...rows].join('\r\n') + '\r\n'
+  } catch {
+    return header + '\r\n'
+  }
+}
