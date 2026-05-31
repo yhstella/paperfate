@@ -13,6 +13,7 @@ import SWUpdateToast from './components/SWUpdateToast.jsx'
 import PWAInstallPrompt from './components/PWAInstallPrompt.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
 import AboutChangelog from './components/AboutChangelog.jsx'
+import FeedbackWidget from './components/FeedbackWidget.jsx'
 import { registerShortcuts } from './lib/shortcuts.js'
 import { getLocale, setLocale } from './lib/i18n.js'
 import * as perfMonitor from './lib/perfMonitor.js'
@@ -310,6 +311,10 @@ export default function App() {
             'paperfate:open-about' event is dispatched (from the
             command palette action above). */}
         <AboutChangelog />
+        {/* Floating "Feedback" button at bottom-right (just above the
+            SWUpdateToast pill). Opens a small modal that POSTs to
+            /api/feedback and renders an in-place "Thanks!" toast. */}
+        <FeedbackWidget />
       </div>
     </ErrorBoundary>
   )
