@@ -44,6 +44,50 @@ import { forecastManuscriptDeterministic } from '../src/server/deterministicExtr
 import { predictFromExtraction } from '../src/server/fatecoreInference.js'
 import { generateSuggestions, generateJointCounterfactual } from '../src/server/suggestionEngine.js'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+
+// ── Audit log writer (best-effort, silent on failure) ─────────────────────
+// Single-line JSON appended to PAPERFATE_AUDIT_LOG_PATH when env is set.
+// Rotates by renaming to `<path>.1` once the file passes 10MB. The matching
+// read-side parser lives in src/server/auditLogParser.js (Worker H).
+const _AUDIT_MAX_BYTES = 10 * 1024 * 1024
+function _ipHash(req) {
+  try {
+    const xff = req.headers['x-forwarded-for']
+    let first = ''
+    if (xff && typeof xff === 'string') {
+      first = (xff.split(',')[0] || '').trim()
+    }
+    const salt = process.env.AUDIT_SALT || ''
+    return crypto.createHash('sha256').update(first + salt).digest('hex').slice(0, 16)
+  } catch {
+    return ''
+  }
+}
+function _writeAuditLog(entry) {
+  const target = process.env.PAPERFATE_AUDIT_LOG_PATH
+  if (!target) return
+  try {
+    // Rotate if file exceeds the cap. statSync throws when the file is
+    // missing — that's the normal first-write case, so swallow it.
+    try {
+      const st = fs.statSync(target)
+      if (st && st.size >= _AUDIT_MAX_BYTES) {
+        try { fs.renameSync(target, target + '.1') } catch {}
+      }
+    } catch {}
+    try {
+      const dir = path.dirname(target)
+      if (dir && dir !== '.' && !fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+    } catch {}
+    fs.appendFileSync(target, JSON.stringify(entry) + '\n')
+  } catch {
+    // Best-effort: never let logging failures break the response.
+  }
+}
 
 // ── Rate limiter (in-memory token bucket) ─────────────────────────────────
 // Best-effort: each warm Vercel instance owns its own Map. A cold start
@@ -368,6 +412,40 @@ export default async function handler(req, res) {
   // (browser fetch wrappers, edge logs) can correlate without parsing JSON.
   res.setHeader('X-Request-Id', requestId)
 
+  // ── Audit log: capture wall time + final status for every code path.
+  // We mirror res.status() so we can read it back inside the finish hook
+  // without depending on res.statusCode (which Vercel's wrapper sometimes
+  // hides until after stream completion).
+  const _auditT0 = Date.now()
+  let _auditStatus = 200
+  let _auditExtractorUsed
+  const _origStatus = res.status?.bind(res)
+  if (_origStatus) {
+    res.status = function (code) {
+      _auditStatus = Number(code) || _auditStatus
+      return _origStatus(code)
+    }
+  }
+  const _emitAudit = () => {
+    _writeAuditLog({
+      ts: new Date().toISOString(),
+      path: '/api/forecast',
+      method: req.method || '',
+      status: _auditStatus,
+      request_id: requestId,
+      wall_ms: Date.now() - _auditT0,
+      ...(_auditExtractorUsed && { extractor_used: _auditExtractorUsed }),
+      ip_hash: _ipHash(req),
+    })
+  }
+  // 'finish' fires on a clean response; 'close' covers early client disconnect.
+  let _auditFired = false
+  const _fireOnce = () => { if (_auditFired) return; _auditFired = true; _emitAudit() }
+  try {
+    res.once?.('finish', _fireOnce)
+    res.once?.('close',  _fireOnce)
+  } catch {}
+
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed', undefined, requestId)
 
@@ -563,6 +641,7 @@ export default async function handler(req, res) {
     const suggestions = generateSuggestions(extraction, manuscript, fatecore, inferenceOpts)
     const jointCounterfactual = generateJointCounterfactual(extraction, manuscript, fatecore, suggestions, inferenceOpts)
     const wallMs = Date.now() - t0
+    if (extraction?.extractor_used) _auditExtractorUsed = extraction.extractor_used
     return res.status(200).json({
       ...extraction,
       ...fatecore,

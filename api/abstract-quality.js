@@ -35,6 +35,48 @@
 //   Retry-After header. The bucket Map self-prunes every minute.
 
 import { forecastManuscript } from '../src/server/extract.js'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+
+// ── Audit log writer (best-effort, silent on failure) ─────────────────────
+// Mirrors api/forecast.js. Appends a single-line JSON entry to
+// PAPERFATE_AUDIT_LOG_PATH when the env var is set; rotates at 10MB.
+const _AUDIT_MAX_BYTES = 10 * 1024 * 1024
+function _ipHash(req) {
+  try {
+    const xff = req.headers['x-forwarded-for']
+    let first = ''
+    if (xff && typeof xff === 'string') {
+      first = (xff.split(',')[0] || '').trim()
+    }
+    const salt = process.env.AUDIT_SALT || ''
+    return crypto.createHash('sha256').update(first + salt).digest('hex').slice(0, 16)
+  } catch {
+    return ''
+  }
+}
+function _writeAuditLog(entry) {
+  const target = process.env.PAPERFATE_AUDIT_LOG_PATH
+  if (!target) return
+  try {
+    try {
+      const st = fs.statSync(target)
+      if (st && st.size >= _AUDIT_MAX_BYTES) {
+        try { fs.renameSync(target, target + '.1') } catch {}
+      }
+    } catch {}
+    try {
+      const dir = path.dirname(target)
+      if (dir && dir !== '.' && !fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+    } catch {}
+    fs.appendFileSync(target, JSON.stringify(entry) + '\n')
+  } catch {
+    // Best-effort: never let logging failures break the response.
+  }
+}
 
 // ── Rate limiter (in-memory token bucket) ─────────────────────────────────
 const RATE_LIMIT_PER_HOUR = 60
@@ -196,6 +238,36 @@ export default async function handler(req, res) {
   const request_id = newRequestId()
   res.setHeader('X-Request-Id', request_id)
 
+  // ── Audit log: capture wall time + final status for every code path.
+  const _auditT0 = Date.now()
+  let _auditStatus = 200
+  let _auditExtractorUsed
+  const _origStatus = res.status?.bind(res)
+  if (_origStatus) {
+    res.status = function (code) {
+      _auditStatus = Number(code) || _auditStatus
+      return _origStatus(code)
+    }
+  }
+  const _emitAudit = () => {
+    _writeAuditLog({
+      ts: new Date().toISOString(),
+      path: '/api/abstract-quality',
+      method: req.method || '',
+      status: _auditStatus,
+      request_id,
+      wall_ms: Date.now() - _auditT0,
+      ...(_auditExtractorUsed && { extractor_used: _auditExtractorUsed }),
+      ip_hash: _ipHash(req),
+    })
+  }
+  let _auditFired = false
+  const _fireOnce = () => { if (_auditFired) return; _auditFired = true; _emitAudit() }
+  try {
+    res.once?.('finish', _fireOnce)
+    res.once?.('close',  _fireOnce)
+  } catch {}
+
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed')
 
@@ -252,6 +324,7 @@ export default async function handler(req, res) {
       geminiOpts,
     })
     const elapsed_ms = Date.now() - t0
+    _auditExtractorUsed = extraction?.extractor_used || 'llm'
     return res.status(200).json({
       overall_score:    extraction?.overall_score    ?? null,
       domain_rollup:    extraction?.domain_rollup    ?? null,
