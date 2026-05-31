@@ -126,3 +126,75 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+
+// Web Push receive side. Server-side delivery (web-push lib, VAPID
+// signing) is not yet wired — this handler exists so that once the
+// delivery sprint lands, push payloads already render correctly.
+//
+// Payload contract (best-effort): JSON { title, body, url, tag, icon }.
+// Any field can be missing; we degrade to sensible defaults rather than
+// dropping the notification, because Chrome/Firefox both penalise SWs
+// that receive a push and then show nothing (userVisibleOnly:true).
+function parsePushData(data) {
+  if (!data) return {};
+  try {
+    return data.json() || {};
+  } catch (_) {
+    try {
+      const text = data.text();
+      if (!text) return {};
+      try { return JSON.parse(text); } catch (_) { return { body: text }; }
+    } catch (_) {
+      return {};
+    }
+  }
+}
+
+self.addEventListener('push', (event) => {
+  const payload = parsePushData(event && event.data);
+  const title = (payload && typeof payload.title === 'string' && payload.title) || 'PaperFate';
+  const options = {
+    body: (payload && typeof payload.body === 'string' && payload.body) || '',
+    icon: (payload && typeof payload.icon === 'string' && payload.icon) || '/favicon.svg',
+    badge: '/favicon.svg',
+    tag: (payload && typeof payload.tag === 'string' && payload.tag) || 'paperfate',
+    data: {
+      url: (payload && typeof payload.url === 'string' && payload.url) || '/',
+    },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  if (event && event.notification && typeof event.notification.close === 'function') {
+    try { event.notification.close(); } catch (_) { /* ignore */ }
+  }
+  const target = (event && event.notification && event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    try {
+      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      // Prefer focusing an existing same-origin window if there is one.
+      for (const client of allClients) {
+        try {
+          const url = new URL(client.url);
+          if (url.origin === self.location.origin) {
+            if (typeof client.focus === 'function') {
+              try {
+                if (typeof client.navigate === 'function' && target && target !== '/' && url.pathname !== target) {
+                  try { await client.navigate(target); } catch (_) { /* ignore */ }
+                }
+              } catch (_) { /* ignore */ }
+              return client.focus();
+            }
+          }
+        } catch (_) { /* ignore individual client */ }
+      }
+      if (self.clients && typeof self.clients.openWindow === 'function') {
+        return self.clients.openWindow(target || '/');
+      }
+    } catch (_) {
+      /* swallow — nothing actionable from a SW context */
+    }
+    return undefined;
+  })());
+});

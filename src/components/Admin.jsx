@@ -46,6 +46,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { trackEvent, getTelemetryStatus } from '../lib/telemetry.js'
+import {
+  DEFAULT_FLAGS,
+  EVENT_NAME as FLAG_EVENT_NAME,
+  STORAGE_KEY as FLAG_STORAGE_KEY,
+  getAllFlags,
+  resetFlags,
+  setFlag,
+} from '../lib/featureFlags.js'
 
 // Same synthetic ≥200-char payload shape as Status.jsx so /api/forecast
 // validation passes without us shipping any real manuscript content.
@@ -315,6 +323,12 @@ export default function Admin() {
   // matches describeCaches()'s return.
   const [cacheStats, setCacheStats] = useState(null)
 
+  // ── Worker IV state ───────────────────────────────────────────────
+  // Feature-flag map. Hydrated from the lib (defaults merged with any
+  // persisted overrides) and refreshed on any 'paperfate:flag-changed'
+  // event so cross-tab / API-driven flips are reflected here.
+  const [flags, setFlags] = useState(() => getAllFlags())
+
   // Guard against late setState after unmount (the health-check fan-out
   // and the SW version probe both await — without this guard a quick
   // tab switch leaks a React warning).
@@ -346,6 +360,61 @@ export default function Admin() {
   const refreshCacheStats = useCallback(async () => {
     const cs = await describeCaches()
     if (aliveRef.current) setCacheStats(cs)
+  }, [])
+
+  // Subscribe to feature-flag changes (both same-tab via our custom
+  // event and cross-tab via the native storage event) so the toggle
+  // panel always reflects the persisted truth — even when another tab
+  // (or the console) flips a flag.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const refresh = () => {
+      if (aliveRef.current) setFlags(getAllFlags())
+    }
+    const onFlagEvent = (e) => {
+      const detail = e && e.detail
+      if (detail && detail.all && typeof detail.all === 'object') {
+        if (aliveRef.current) setFlags({ ...detail.all })
+      } else {
+        refresh()
+      }
+    }
+    const onStorage = (e) => {
+      if (!e || e.key !== FLAG_STORAGE_KEY) return
+      refresh()
+    }
+    window.addEventListener(FLAG_EVENT_NAME, onFlagEvent)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(FLAG_EVENT_NAME, onFlagEvent)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+
+  // Toggle a single flag and fire the telemetry event. The lib
+  // dispatches 'paperfate:flag-changed' which our subscription above
+  // catches and writes back to state, so we don't setFlags() here.
+  const toggleFlag = useCallback((name, nextValue) => {
+    const value = nextValue === true
+    setFlag(name, value)
+    try { trackEvent('flag_toggle', { flag: name, value }) }
+    catch { /* telemetry is best-effort */ }
+  }, [])
+
+  // Reset every flag to its DEFAULT_FLAGS value. We fire one
+  // 'flag_toggle' event per flag whose effective value actually
+  // changed, so downstream telemetry doesn't get a synthetic 'reset'
+  // bucket it has to special-case.
+  const onResetFlags = useCallback(() => {
+    const before = getAllFlags()
+    resetFlags()
+    try {
+      for (const key of Object.keys(DEFAULT_FLAGS)) {
+        if (before[key] !== DEFAULT_FLAGS[key]) {
+          trackEvent('flag_toggle', { flag: key, value: DEFAULT_FLAGS[key] === true })
+        }
+      }
+    } catch { /* ignore */ }
   }, [])
 
   // Run the same probes as the Round 14 health-check, then append a
@@ -733,6 +802,84 @@ export default function Admin() {
           {cacheStats && cacheStats.error && (
             <p className="mt-2 font-mono text-[11px] text-rose-300">{cacheStats.error}</p>
           )}
+        </div>
+      </div>
+
+      {/* ── Worker IV: feature flags ───────────────────────────── */}
+      <div className="mt-4">
+        <div
+          role="region"
+          aria-label="Feature flags"
+          className="rounded-xl border border-white/10 bg-ink-900 p-4"
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-200">Feature flags</h3>
+            <button
+              type="button"
+              onClick={onResetFlags}
+              className="rounded-md border border-white/10 bg-ink-800 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-ink-700 focus:outline-none focus:ring-2 focus:ring-fate-400"
+              aria-label="Reset feature flags to defaults"
+            >
+              Reset to defaults
+            </button>
+          </div>
+          <p className="mb-3 text-[11px] text-slate-500">
+            Client-side overrides stored in{' '}
+            <code className="rounded bg-black/40 px-1 py-0.5 text-[11px]">
+              localStorage.{FLAG_STORAGE_KEY}
+            </code>
+            . Changes apply immediately and broadcast via{' '}
+            <code className="rounded bg-black/40 px-1 py-0.5 text-[11px]">
+              {FLAG_EVENT_NAME}
+            </code>
+            .
+          </p>
+          <ul className="divide-y divide-white/5">
+            {Object.keys(DEFAULT_FLAGS).map((name) => {
+              const value = flags[name] === true
+              const defaultValue = DEFAULT_FLAGS[name] === true
+              const overridden = value !== defaultValue
+              return (
+                <li
+                  key={name}
+                  className="flex items-center justify-between gap-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-mono text-slate-200">{name}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-500">
+                      default: {String(defaultValue)}
+                      {overridden && ' · overridden'}
+                    </div>
+                  </div>
+                  <label
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-2"
+                    aria-label={`Toggle ${name}`}
+                  >
+                    <span
+                      className={`font-mono text-[11px] ${value ? 'text-emerald-300' : 'text-slate-400'}`}
+                    >
+                      {value ? 'on' : 'off'}
+                    </span>
+                    <span
+                      className={`relative inline-block h-5 w-9 rounded-full transition-colors ${value ? 'bg-emerald-600/70' : 'bg-slate-600/60'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                        checked={value}
+                        onChange={(e) => toggleFlag(name, e.target.checked)}
+                        aria-label={`${name} feature flag`}
+                      />
+                      <span
+                        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? 'translate-x-4' : 'translate-x-0'} peer-focus-visible:ring-2 peer-focus-visible:ring-fate-400`}
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </label>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       </div>
     </section>
