@@ -24,3 +24,7 @@ codex-batch.json
 codex-response.json
 scripts/__pycache__/
 __pycache__/
+
+# Endpoints temporarily disabled to stay under the function-count limit.
+# Restore by moving back to api/ once on a higher Vercel plan.
+api-disabled/
