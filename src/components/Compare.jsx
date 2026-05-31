@@ -235,18 +235,18 @@ export default function Compare() {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         <div className="lg:col-span-2">
           <h2 className="font-serif text-3xl tracking-tight sm:text-4xl">{t('compare.title')}</h2>
-          <p className="mt-3 text-slate-400">
+          <p className="mt-3 text-slate-600 dark:text-slate-400">
             Drop 2–5 journals — by name or ISSN — and see JIF, quartile, OA status,
             APC, h-index, and scope side-by-side. Useful for shortlisting a target
             before you run the simulator.
           </p>
-          <div className="mt-6 text-xs text-slate-500">
+          <div className="mt-6 text-xs text-slate-600 dark:text-slate-500">
             Try a sample:
             <button
               type="button"
               onClick={loadSample}
               aria-label="Load sample journals: NEJM, Lancet, JAMA, Annals"
-              className="ml-2 rounded-md border border-fate-400/30 bg-fate-400/[0.06] px-2.5 py-1 text-xs text-fate-300 hover:bg-fate-400/[0.12] transition-colors"
+              className="ml-2 rounded-md border border-fate-500/40 bg-fate-100/40 px-2.5 py-1 text-xs text-fate-700 hover:bg-fate-100/70 dark:border-fate-400/30 dark:bg-fate-400/[0.06] dark:text-fate-300 dark:hover:bg-fate-400/[0.12] transition-colors"
             >
               NEJM · Lancet · JAMA · Annals
             </button>
@@ -257,10 +257,10 @@ export default function Compare() {
           <div className="space-y-4">
             <label className="block" htmlFor="compare-journals-input">
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   {t('compare.label_input')}
                 </span>
-                <span className="text-[11px] text-slate-500" aria-hidden="true">
+                <span className="text-[11px] text-slate-600 dark:text-slate-500" aria-hidden="true">
                   {tokenCount}/5 · {parsed.issns.length} ISSN · {parsed.names.length} name
                 </span>
               </div>
@@ -283,12 +283,12 @@ export default function Compare() {
             {tokenCount > 0 && (
               <div className="flex flex-wrap gap-1.5" aria-label="Parsed entries">
                 {parsed.issns.map(s => (
-                  <span key={`i-${s}`} className="chip border-emerald-400/30 text-emerald-300/90 bg-emerald-400/[0.06]">
+                  <span key={`i-${s}`} className="chip border-emerald-500/40 text-emerald-800 bg-emerald-100/60 dark:border-emerald-400/30 dark:text-emerald-300/90 dark:bg-emerald-400/[0.06]">
                     ISSN · {s}
                   </span>
                 ))}
                 {parsed.names.map(s => (
-                  <span key={`n-${s}`} className="chip border-fate-400/30 text-fate-300 bg-fate-400/[0.06]">
+                  <span key={`n-${s}`} className="chip border-fate-500/40 text-fate-700 bg-fate-100/60 dark:border-fate-400/30 dark:text-fate-300 dark:bg-fate-400/[0.06]">
                     {s}
                   </span>
                 ))}
@@ -296,7 +296,7 @@ export default function Compare() {
             )}
 
             <div className="flex items-center justify-between gap-3 pt-1">
-              <div id="compare-input-hint" className="text-[11px] text-slate-500">
+              <div id="compare-input-hint" className="text-[11px] text-slate-600 dark:text-slate-500">
                 Matches /\d{'{4}'}-\d{'{3}'}[\dxX]/ go to ISSN lookup. Everything else is name-matched.
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -305,7 +305,7 @@ export default function Compare() {
                     type="button"
                     onClick={onClearClick}
                     aria-label={t('compare.clear_button')}
-                    className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.02] dark:text-slate-300 dark:hover:bg-white/[0.06] transition-colors"
                   >
                     {t('compare.clear_button')}
                   </button>
@@ -322,12 +322,12 @@ export default function Compare() {
             </div>
 
             {tokenCount > 0 && tokenCount < 2 && (
-              <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200">
+              <div className="rounded-md border border-amber-500/40 bg-amber-100/50 p-2.5 text-[11px] text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/[0.04] dark:text-amber-200">
                 {t('compare.error_no_input')}
               </div>
             )}
             {tokenCount > 5 && (
-              <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] p-2.5 text-[11px] text-amber-200">
+              <div className="rounded-md border border-amber-500/40 bg-amber-100/50 p-2.5 text-[11px] text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/[0.04] dark:text-amber-200">
                 {t('compare.error_too_many')}
               </div>
             )}
@@ -341,16 +341,16 @@ export default function Compare() {
           <div
             role="alert"
             aria-live="assertive"
-            className="card p-6 text-sm text-amber-200"
+            className="card p-6 text-sm text-amber-800 dark:text-amber-200"
           >
             <div className="font-semibold mb-1">{t('compare.error_network')}</div>
-            <div className="text-amber-200 text-[13px]">{error}</div>
+            <div className="text-amber-800 dark:text-amber-200 text-[13px]">{error}</div>
             <div className="mt-3">
               <button
                 type="button"
                 onClick={onSubmit}
                 disabled={!canSubmit}
-                className="rounded-md border border-amber-300/30 bg-amber-300/[0.06] px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-300/[0.12] transition-colors disabled:opacity-50"
+                className="rounded-md border border-amber-500/40 bg-amber-100/60 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/[0.06] dark:text-amber-100 dark:hover:bg-amber-300/[0.12] transition-colors disabled:opacity-50"
               >
                 {t('compare.refresh_button')}
               </button>
@@ -503,7 +503,7 @@ function CompareResults({ journals }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <label htmlFor="compare-sort" className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <label htmlFor="compare-sort" className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
             Sort
           </label>
           <select
@@ -511,7 +511,7 @@ function CompareResults({ journals }) {
             value={sortValue}
             onChange={onSortChange}
             aria-label="Sort comparison table"
-            className="rounded-md border border-white/10 bg-white/[0.02] px-2.5 py-1.5 text-xs text-slate-200 hover:bg-white/[0.06] focus:outline-none focus:ring-1 focus:ring-fate-400/40 transition-colors"
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 hover:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-fate-500/40 dark:border-white/10 dark:bg-white/[0.02] dark:text-slate-200 dark:hover:bg-white/[0.06] dark:focus:ring-fate-400/40 transition-colors"
           >
             {SORT_OPTIONS.map(o => (
               <option key={o.value} value={o.value}>{t(o.labelKey) + (o.suffix || '')}</option>
@@ -523,14 +523,14 @@ function CompareResults({ journals }) {
             type="button"
             onClick={onCopyTSV}
             aria-label={t('compare.copy_to_clipboard')}
-            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.02] dark:text-slate-300 dark:hover:bg-white/[0.06] transition-colors"
           >
             {t('compare.copy_to_clipboard')}
           </button>
           <span
             role="status"
             aria-live="polite"
-            className={`text-[11px] transition-opacity duration-150 ${copied ? 'opacity-100 text-emerald-300' : 'opacity-0 text-slate-500'}`}
+            className={`text-[11px] transition-opacity duration-150 ${copied ? 'opacity-100 text-emerald-700 dark:text-emerald-300' : 'opacity-0 text-slate-600 dark:text-slate-500'}`}
           >
             {copied ? 'Copied!' : ' '}
           </span>
@@ -542,14 +542,14 @@ function CompareResults({ journals }) {
       {showPagination && (
         <nav
           aria-label="Comparison pagination"
-          className="flex items-center justify-between gap-3 text-xs text-slate-400"
+          className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400"
         >
           <button
             type="button"
             onClick={onPrev}
             disabled={safePage === 0}
             aria-label={t('compare.page_prev')}
-            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.02] dark:text-slate-300 dark:hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             ← {t('compare.page_prev')}
           </button>
@@ -561,7 +561,7 @@ function CompareResults({ journals }) {
             onClick={onNext}
             disabled={safePage >= pageCount - 1}
             aria-label={t('compare.page_next')}
-            className="rounded-md border border-white/10 bg-white/[0.02] px-3 py-1.5 text-slate-300 hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.02] dark:text-slate-300 dark:hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {t('compare.page_next')} →
           </button>
@@ -578,7 +578,7 @@ function CompareTable({ journals, totalCount }) {
   return (
     <div className="card p-5 sm:p-6 animate-fade-up overflow-x-auto">
       <div className="mb-4 flex items-center justify-between">
-        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
           Side-by-side comparison
         </div>
         <span className="chip">{countLabel}</span>
@@ -594,7 +594,7 @@ function CompareTable({ journals, totalCount }) {
           <tr>
             <th
               scope="col"
-              className="sticky left-0 z-10 bg-ink-800/80 backdrop-blur-sm text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-3 py-2 border-b border-white/5"
+              className="sticky left-0 z-10 bg-slate-100/90 backdrop-blur-sm text-left text-[11px] font-semibold uppercase tracking-wider text-slate-600 px-3 py-2 border-b border-slate-200 dark:bg-ink-800/80 dark:text-slate-400 dark:border-white/5"
             >
               Metric
             </th>
@@ -602,7 +602,7 @@ function CompareTable({ journals, totalCount }) {
               <th
                 key={`h-${i}`}
                 scope="col"
-                className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-300 px-3 py-2 border-b border-white/5 min-w-[160px]"
+                className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-700 px-3 py-2 border-b border-slate-200 min-w-[160px] dark:text-slate-300 dark:border-white/5"
               >
                 {j.name || j.issn || `Journal ${i + 1}`}
               </th>
@@ -613,10 +613,10 @@ function CompareTable({ journals, totalCount }) {
           {ROWS.map(row => {
             const label = row.labelKey ? t(row.labelKey) : row.label
             return (
-              <tr key={row.key} className="hover:bg-white/[0.02]">
+              <tr key={row.key} className="hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                 <th
                   scope="row"
-                  className="sticky left-0 bg-ink-800/80 backdrop-blur-sm align-top px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500 border-b border-white/5"
+                  className="sticky left-0 bg-slate-100/90 backdrop-blur-sm align-top px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-600 border-b border-slate-200 dark:bg-ink-800/80 dark:text-slate-500 dark:border-white/5"
                 >
                   {label}
                 </th>
@@ -627,7 +627,7 @@ function CompareTable({ journals, totalCount }) {
                   return (
                     <td
                       key={`${row.key}-${i}`}
-                      className={`align-top px-3 py-2 border-b border-white/5 ${isMissing ? 'text-slate-500' : 'text-slate-200'} ${row.key === 'scope' ? 'text-[12px] leading-relaxed' : ''}`}
+                      className={`align-top px-3 py-2 border-b border-slate-200 dark:border-white/5 ${isMissing ? 'text-slate-500 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'} ${row.key === 'scope' ? 'text-[12px] leading-relaxed' : ''}`}
                     >
                       {value}
                     </td>
@@ -638,7 +638,7 @@ function CompareTable({ journals, totalCount }) {
           })}
         </tbody>
       </table>
-      <div className="mt-3 text-[11px] text-slate-500">
+      <div className="mt-3 text-[11px] text-slate-600 dark:text-slate-500">
         Missing fields render as "—". JIF and quartile reflect the most recent JCR release in PaperFate's snapshot.
       </div>
     </div>
@@ -654,10 +654,10 @@ function CompareSkeleton() {
       className="card p-6 animate-fade-up"
     >
       <span className="sr-only">Loading comparison results…</span>
-      <div className="h-4 w-40 rounded bg-white/5 mb-4 animate-pulse" aria-hidden="true" />
+      <div className="h-4 w-40 rounded bg-slate-200 dark:bg-white/5 mb-4 animate-pulse" aria-hidden="true" />
       <div className="grid gap-3" aria-hidden="true">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-8 w-full rounded bg-white/5 animate-pulse" />
+          <div key={i} className="h-8 w-full rounded bg-slate-200 dark:bg-white/5 animate-pulse" />
         ))}
       </div>
     </div>
