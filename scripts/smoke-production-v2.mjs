@@ -325,6 +325,11 @@ async function probeExtrasLookup() {
     } else {
       degraded = true
     }
+  } else if (r.status === 404) {
+    // Endpoint moved to api-disabled/ to stay under the function-count
+    // limit (see api-disabled/). Expected — WARN, not FAIL, until restored
+    // on a higher Vercel plan.
+    degraded = true; fail_reason = 'disabled (api-disabled/)'
   } else {
     ok = false; fail_reason = `HTTP ${r.status}`
   }
