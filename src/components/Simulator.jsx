@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { forecast, fetchSimilar, fetchJournalInfo, fetchReferencesSummary, fetchAuthorFeatures, abstractQuality, DOMAIN_COLORS, DOMAIN_NAMES } from '../lib/forecastClient.js'
 import { extractAll, extractAuthors, extractDois } from '../lib/extractMeta.js'
 import { trackEvent } from '../lib/telemetry.js'
-import { t } from '../lib/i18n.js'
+import { t, useLocale } from '../lib/i18n.js'
 import ResultPanel from './ResultPanel.jsx'
 import DomainRollup from './DomainRollup.jsx'
 import FileUpload from './FileUpload.jsx'
@@ -212,6 +212,9 @@ const STUDY_TYPE_TO_ARTICLE_TYPE = {
 }
 
 export default function Simulator() {
+  // Subscribe to locale changes so picking a new language in Nav re-renders the
+  // whole Simulator immediately (t() reads the current locale at render time).
+  useLocale()
   const [inputMode, setInputMode] = useState('abstract')
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
@@ -280,6 +283,9 @@ export default function Simulator() {
               setInputMode(entry.mode)
             }
             trackEvent('history_restore_url', { id: fid })
+            // Restored a past run — drop any half-typed draft so the debounced
+            // save effect doesn't clobber localStorage with the restored preview.
+            clearDraft()
             restoredFromHistory = true
           }
         }
@@ -1122,6 +1128,9 @@ export default function Simulator() {
           setStatus('idle')
           setResult(null)
           setHistoryOpen(false)
+          // Drop any half-typed draft so the debounced save effect doesn't
+          // clobber localStorage with the restored (truncated) preview text.
+          clearDraft()
         }}
       />
 
@@ -1254,7 +1263,7 @@ function resultLegacyShape(r, ctx = {}) {
     deskReject: deskRejectFormat(p.desk_reject_risk),
     timeline: timelineFromPrediction(p.review_timeline_days, p.jcr_jif),
     citation: citationsFormat(p.citations_5yr, r.overall_score),
-    weakness: degradedMode ? 'Rubric scoring unavailable for this run' : baseWeakness,
+    weakness: degradedMode ? t('result.weakness_unavailable') : baseWeakness,
     suggestions: degradedMode
       ? ['Re-run with a full manuscript for actionable suggestions']
       : baseSuggestions,

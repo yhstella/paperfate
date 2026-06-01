@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
-import { t } from '../lib/i18n.js'
+import { t, useLocale } from '../lib/i18n.js'
 
 const ISSN_RE = /^\d{4}-\d{3}[\dxX]$/
 const PLACEHOLDER = 'NEJM, Lancet, JAMA, Annals of Internal Medicine'
@@ -15,11 +15,10 @@ const ROWS = [
   { key: 'name',          labelKey: null,                      label: 'Journal name' },
   { key: 'publisher',     labelKey: 'compare.columns.publisher' },
   { key: 'jif',           labelKey: 'compare.columns.jif',           fmt: fmtNumber },
-  { key: 'jcr_quartile',  labelKey: 'compare.columns.quartile' },
-  { key: 'oa_status',     labelKey: 'compare.columns.oa_status' },
-  { key: 'apc_usd',       labelKey: 'compare.columns.apc',           fmt: fmtMoney },
+  { key: 'quartile',      labelKey: 'compare.columns.quartile' },
+  { key: 'is_oa',         labelKey: 'compare.columns.oa_status',     fmt: fmtBool },
+  { key: 'apc',           labelKey: 'compare.columns.apc',           fmt: fmtMoney },
   { key: 'h_index',       labelKey: 'compare.columns.h_index',       fmt: fmtInt },
-  { key: 'scope',         labelKey: 'compare.columns.scope' },
 ]
 
 function fmtNumber(v) {
@@ -31,6 +30,10 @@ function fmtInt(v) {
   if (v == null || v === '') return '—'
   const n = Number(v)
   return Number.isFinite(n) ? String(Math.round(n)) : '—'
+}
+function fmtBool(v) {
+  if (v == null) return '—'
+  return v ? 'Yes' : 'No'
 }
 function fmtMoney(v) {
   if (v == null || v === '') return '—'
@@ -101,6 +104,7 @@ function clearDraft() {
 }
 
 export default function Compare() {
+  useLocale()   // subscribe so a language switch re-renders Compare + children
   const [raw, setRaw] = useState('')
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState(null)
@@ -588,7 +592,7 @@ function CompareTable({ journals, totalCount }) {
         aria-label="Side-by-side journal comparison"
       >
         <caption className="sr-only">
-          Comparison of {journals.length} journals across {ROWS.length} metrics including JIF, JCR quartile, open access status, APC, h-index, and scope.
+          Comparison of {journals.length} journals across {ROWS.length} metrics including JIF, JCR quartile, open access status, APC, and h-index.
         </caption>
         <thead>
           <tr>
@@ -627,7 +631,7 @@ function CompareTable({ journals, totalCount }) {
                   return (
                     <td
                       key={`${row.key}-${i}`}
-                      className={`align-top px-3 py-2 border-b border-slate-200 dark:border-white/5 ${isMissing ? 'text-slate-500 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'} ${row.key === 'scope' ? 'text-[12px] leading-relaxed' : ''}`}
+                      className={`align-top px-3 py-2 border-b border-slate-200 dark:border-white/5 ${isMissing ? 'text-slate-500 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'}`}
                     >
                       {value}
                     </td>
