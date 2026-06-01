@@ -119,7 +119,21 @@ export function useLocale() {
       setLocaleState(next)
     }
     window.addEventListener(EVENT_NAME, handler)
-    return () => window.removeEventListener(EVENT_NAME, handler)
+
+    // Cross-tab sync via the native storage event. Another tab writing
+    // 'paperfate.locale' fires this; our in-memory cachedLocale is stale,
+    // so reset it before re-reading. Mirrors theme.js's onStorage pattern.
+    const onStorage = (e) => {
+      if (!e || e.key !== STORAGE_KEY) return
+      _resetLocaleCache()
+      setLocaleState(getLocale())
+    }
+    window.addEventListener('storage', onStorage)
+
+    return () => {
+      window.removeEventListener(EVENT_NAME, handler)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
   return locale

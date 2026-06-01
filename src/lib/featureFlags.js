@@ -42,7 +42,7 @@ export const EVENT_NAME = 'paperfate:flag-changed'
 export const DEFAULT_FLAGS = Object.freeze({
   experimentalAdjustedBlend: false,
   showCmdKHint: true,
-  enableFeedbackWidget: true,
+  enableFeedbackWidget: false,
   useNewProgressBar: false,
 })
 

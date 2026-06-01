@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { trackEvent } from '../lib/telemetry.js'
+import { isEnabled } from '../lib/featureFlags.js'
 
 // Small floating "Feedback" button (bottom-right, above the SWUpdateToast
 // pill at bottom-4 right-4). Clicking it opens a modal dialog with:
@@ -66,6 +67,11 @@ function StarRow({ value, onChange, disabled }) {
 }
 
 export default function FeedbackWidget() {
+  // Hide entirely while the feedback endpoint is disabled/undeployed, so we
+  // never POST to a 404. Read once on mount — the flag default is off until
+  // /api/feedback returns. Kept in state so hooks below run unconditionally.
+  const [enabled] = useState(() => isEnabled('enableFeedbackWidget'))
+
   const [open, setOpen] = useState(false)
   const [rating, setRating] = useState(0)
   const [text, setText] = useState('')
@@ -172,7 +178,11 @@ export default function FeedbackWidget() {
           const j = await res.json()
           detail = (j && (j.error || j.detail)) ? String(j.error || j.detail) : ''
         } catch { /* ignore */ }
-        if (res.status === 429) {
+        if (res.status === 404 || res.status === 501) {
+          // The feedback endpoint is not deployed (or has been disabled).
+          // Don't invite the user to retry forever — say it's unavailable.
+          setErrorMsg('Feedback channel is temporarily unavailable. Please try again later.')
+        } else if (res.status === 429) {
           setErrorMsg('You have sent a lot of feedback recently. Please try again in a bit.')
         } else if (res.status === 400 && detail) {
           setErrorMsg(`We could not accept that submission (${detail}).`)
@@ -203,6 +213,10 @@ export default function FeedbackWidget() {
       setSubmitting(false)
     }
   }
+
+  // Flag gate: render nothing when the feedback widget is disabled. Placed
+  // after all hooks so hook order stays stable across renders.
+  if (!enabled) return null
 
   // The trigger button sits at bottom-20 right-4. SWUpdateToast lives at
   // bottom-4 right-4 (with at most a 1–2 line pill, ~40px tall), so a
