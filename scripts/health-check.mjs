@@ -342,6 +342,24 @@ async function phasePwaAssets() {
 }
 
 // ─── Phase 6: Endpoint reachability ─────────────────────────────────────────
+// Endpoints intentionally moved to api-disabled/ to stay under the Vercel
+// function-count limit. A 404 on these is EXPECTED — treat as AMBER
+// ('disabled'), not RED. Matches smoke-production-v2.mjs. Compared against
+// the leading path segment after /api/ so query strings don't matter.
+const DISABLED_ENDPOINTS = new Set([
+  'extras-lookup',
+  'status-stream',
+  'webhook-receive',
+  'audit-log',
+  'push-subscribe',
+  'feedback',
+])
+
+function endpointName(path) {
+  // '/api/extras-lookup?x=1' -> 'extras-lookup'
+  return path.replace(/^\/api\//, '').split(/[?/]/)[0]
+}
+
 const ENDPOINTS = [
   { method: 'POST', path: '/api/forecast', body: { title: SAMPLE_TITLE, abstract: SAMPLE_ABSTRACT, mode: 'Q100' } },
   { method: 'POST', path: '/api/similar', body: { title: SAMPLE_TITLE, abstract: SAMPLE_ABSTRACT } },
@@ -377,8 +395,11 @@ async function phaseReachability() {
     } else if (r.status === 503) {
       // graceful unavailable — amber
       record('6. Endpoints', label, AMBER, `${r.status} (graceful)`)
+    } else if (r.status === 404 && DISABLED_ENDPOINTS.has(endpointName(ep.path))) {
+      // Intentionally retired to api-disabled/ — amber, not red.
+      record('6. Endpoints', label, AMBER, `${r.status} disabled (api-disabled/)`)
     } else {
-      // 404 or 500 etc — red
+      // 404 (unexpected) or 500 etc — red
       record('6. Endpoints', label, RED, `HTTP ${r.status}`)
     }
   }

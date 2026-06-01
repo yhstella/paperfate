@@ -179,6 +179,12 @@ const PROBES = [
         body: JSON.stringify({ doi: '10.1056/NEJMoa1504720' }),
       })
       const raw = await safeJson(res)
+      // 404 means the endpoint was retired to api-disabled/ to stay under
+      // the Vercel function-count limit. This is intentional — surface as
+      // amber/'disabled', NOT red. Mirrors smoke-production-v2.mjs.
+      if (res.status === 404) {
+        return { httpStatus: res.status, ok: true, degraded: true, disabled: true, note: 'disabled', raw }
+      }
       // 503 with source:'unavailable' is a known graceful state (subset
       // file not yet populated) — surface as amber, not red.
       if (res.status === 503 && raw && raw.source === 'unavailable') {
@@ -473,7 +479,8 @@ export default function Status() {
                         {state !== 'pending' && (
                           <>
                             HTTP {httpStatus || '—'}
-                            {result && result.degraded && ' · degraded mode'}
+                            {result && result.disabled && ` · ${result.note || 'disabled'}`}
+                            {result && result.degraded && !result.disabled && ' · degraded mode'}
                             {errMsg && ` · ${errMsg}`}
                           </>
                         )}

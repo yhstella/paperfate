@@ -119,8 +119,14 @@ const HEALTH_ROWS = [
         body: JSON.stringify({ doi: '10.1056/NEJMoa1504720' }),
       })
       const raw = await safeJson(res)
-      // Mirror Status.jsx: 503 + source:'unavailable' is a known graceful
-      // state (subset file not yet populated) — surface as amber.
+      // Mirror Status.jsx: 404 means the endpoint was retired to
+      // api-disabled/ to stay under the Vercel function-count limit. This
+      // is intentional — surface as warn/'disabled', NOT fail.
+      if (res.status === 404) {
+        return { httpStatus: res.status, ok: true, degraded: true, disabled: true, note: 'disabled', raw }
+      }
+      // 503 + source:'unavailable' is a known graceful state (subset file
+      // not yet populated) — surface as amber.
       if (res.status === 503 && raw && raw.source === 'unavailable') {
         return { httpStatus: res.status, ok: true, degraded: true, raw }
       }
@@ -533,7 +539,8 @@ export default function Admin() {
                       {state !== 'pending' && (
                         <>
                           HTTP {httpStatus || '—'}
-                          {result && result.degraded && ' · degraded mode'}
+                          {result && result.disabled && ` · ${result.note || 'disabled'}`}
+                          {result && result.degraded && !result.disabled && ' · degraded mode'}
                           {errMsg && ` · ${errMsg}`}
                         </>
                       )}
