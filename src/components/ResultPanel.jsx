@@ -55,14 +55,14 @@ export default function ResultPanel({ result, input }) {
   const titleDisplay = safeTitle || 'Untitled manuscript'
   const titleTrunc = safeTitle.length > 90
 
-  const llmHealth = input?.llmHealth
-  const extractionFallbackReason = input?.extractionFallbackReason
-  const extractorUsed = input?.extractorUsed
-  const degradedMode = input?.degradedMode || llmHealth?.status === 'degraded'
-  const authorsCount = input?.authorsCount
-  const referencesCount = input?.referencesCount
-  const runMode = input?.mode
-  const inputJifPoint = input?.manuscriptJifPoint
+  const llmHealth = result?.llmHealth ?? input?.llmHealth
+  const extractionFallbackReason = result?.extractionFallbackReason ?? input?.extractionFallbackReason
+  const extractorUsed = result?.extractorUsed ?? input?.extractorUsed
+  const degradedMode = (result?.degradedMode ?? input?.degradedMode) || llmHealth?.status === 'degraded'
+  const authorsCount = result?.authorsCount ?? input?.authorsCount
+  const referencesCount = result?.referencesCount ?? input?.referencesCount
+  const runMode = result?.mode ?? input?.mode
+  const inputJifPoint = manuscriptJifPoint ?? input?.manuscriptJifPoint
 
   const hideCounterfactuals = extractorUsed === 'deterministic' || extractorUsed === 'rule_fallback' || !!extractionFallbackReason
 
