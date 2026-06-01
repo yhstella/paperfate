@@ -35,6 +35,7 @@
 //   Retry-After header. The bucket Map self-prunes every minute.
 
 import { forecastManuscript } from '../src/server/extract.js'
+import { isOriginAllowed, blockDisallowedOrigin } from '../src/server/apiGuard.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -150,15 +151,13 @@ function _bypassRateLimit(req) {
 
 export const config = { maxDuration: 60, runtime: 'nodejs' }
 
-const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180')
-  .split(',').map(s => s.trim())
-
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  // ACAO echoed only for an allowed origin (incl. www + *.vercel.app).
+  const allow = isOriginAllowed(origin) ? origin : null
   return {
-    'Access-Control-Allow-Origin':  allow,
+    ...(allow && { 'Access-Control-Allow-Origin': allow }),
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Paperfate-Internal',
     'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Request-Id',
     'Vary': 'Origin',
   }
@@ -270,6 +269,9 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed')
+
+  // Reject cross-origin browser copies (Origin present but not allowlisted).
+  if (blockDisallowedOrigin(req, res, request_id)) return
 
   // Rate limit BEFORE readBody so abusive clients can't waste bandwidth.
   // Internal bypass header (when env token is set) skips the bucket entirely.

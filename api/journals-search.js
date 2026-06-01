@@ -12,6 +12,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { corsHeaders as guardCors, blockDisallowedOrigin, createRateLimiter, applyRateLimit } from '../src/server/apiGuard.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
@@ -19,19 +20,8 @@ const SHORTLIST_PATH = join(ROOT, 'weights', 'journals-shortlist.json')
 
 export const config = { maxDuration: 10, runtime: 'nodejs' }
 
-const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180')
-  .split(',').map(s => s.trim())
-
-function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
-  const h = {
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Vary': 'Origin',
-  }
-  if (allow) h['Access-Control-Allow-Origin'] = allow
-  return h
-}
+// Cheap in-memory shortlist search → generous inbound cap.
+const limiter = createRateLimiter(120)
 
 let _journals = null
 function loadJournals() {
@@ -72,9 +62,12 @@ function rank(journal, qLower, qRaw) {
 
 export default function handler(req, res) {
   const origin = req.headers.origin || ''
-  for (const [k, v] of Object.entries(corsHeaders(origin))) res.setHeader(k, v)
+  for (const [k, v] of Object.entries(guardCors(origin, 'GET, OPTIONS'))) res.setHeader(k, v)
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'GET') return res.status(405).json({ error: 'method_not_allowed' })
+
+  if (blockDisallowedOrigin(req, res)) return
+  if (applyRateLimit(req, res, limiter)) return
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
   const qRaw = String(url.searchParams.get('q') || '').trim()

@@ -17,25 +17,16 @@
 // to type h-index manually. Helps v0.2-prod escape its mid-tier prior for
 // high-impact teams.
 
-export const config = { maxDuration: 30, runtime: 'nodejs' }
+import { corsHeaders as guardCors, blockDisallowedOrigin, createRateLimiter, applyRateLimit } from '../src/server/apiGuard.js'
 
-const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180')
-  .split(',').map(s => s.trim())
+export const config = { maxDuration: 30, runtime: 'nodejs' }
 
 const MAX_AUTHORS = 25
 const PARALLEL = 5
 const MAILTO = process.env.PAPERFATE_OPENALEX_MAILTO || 'beta@paperfate.com'
 
-function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : null
-  const h = {
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Vary': 'Origin',
-  }
-  if (allow) h['Access-Control-Allow-Origin'] = allow
-  return h
-}
+// OpenAlex author lookups are heavier (fan-out fetches), so a tighter cap.
+const limiter = createRateLimiter(60)
 
 function bad(res, status, error, detail) {
   return res.status(status).json({ error, ...(detail !== undefined && { detail }) })
@@ -91,9 +82,12 @@ function median(arr) {
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || ''
-  for (const [k, v] of Object.entries(corsHeaders(origin))) res.setHeader(k, v)
+  for (const [k, v] of Object.entries(guardCors(origin, 'POST, OPTIONS'))) res.setHeader(k, v)
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return bad(res, 405, 'method_not_allowed')
+
+  if (blockDisallowedOrigin(req, res)) return
+  if (applyRateLimit(req, res, limiter)) return
 
   let body
   try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e)) }

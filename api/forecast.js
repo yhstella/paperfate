@@ -43,6 +43,7 @@ import { forecastManuscript } from '../src/server/extract.js'
 import { forecastManuscriptDeterministic } from '../src/server/deterministicExtract.js'
 import { predictFromExtraction } from '../src/server/fatecoreInference.js'
 import { generateSuggestions, generateJointCounterfactual } from '../src/server/suggestionEngine.js'
+import { isOriginAllowed, blockDisallowedOrigin } from '../src/server/apiGuard.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -169,17 +170,18 @@ export const config = {
   runtime: 'nodejs',
 }
 
-const ALLOWED_ORIGINS = (process.env.PAPERFATE_ALLOWED_ORIGINS || 'https://paperfate.com,http://localhost:5180,http://127.0.0.1:5180').split(',').map(s => s.trim())
-
 const MAX_BODY_BYTES = 256 * 1024
 const READ_TIMEOUT_MS = 10000
 
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  // Only echo ACAO for an allowed origin (incl. www + *.vercel.app preview);
+  // never reflect a disallowed origin. blockDisallowedOrigin() rejects
+  // cross-origin browser copies with a 403 before any work runs.
+  const allow = isOriginAllowed(origin) ? origin : null
   return {
-    'Access-Control-Allow-Origin':  allow,
+    ...(allow && { 'Access-Control-Allow-Origin': allow }),
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Paperfate-Internal',
     'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-Request-Id',
     'Vary': 'Origin',
   }
@@ -448,6 +450,10 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST')   return bad(res, 405, 'method_not_allowed', undefined, requestId)
+
+  // Reject cross-origin browser copies (Origin present but not allowlisted).
+  // Origin-less requests (curl/server) pass here and are capped by the bucket.
+  if (blockDisallowedOrigin(req, res, requestId)) return
 
   // Rate limit BEFORE readBody so abusive clients can't waste bandwidth.
   // Internal bypass header (when env token is set) skips the bucket entirely.
