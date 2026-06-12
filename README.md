@@ -128,11 +128,15 @@ Round 1 + Round 2 deliverables landed in production:
   banner, abstract-quality fast path.
 - **SEO** — sitemap and robots refreshed; per-route metadata; OG card
   alignment with the in-app brand voice.
-- **Smoke harness v2** — `scripts/smoke-production-v2.mjs` hits the 9
-  public endpoints with realistic payloads, asserts shape + latency
-  budgets, and prints a final table. Degraded mode is reported as
-  WARN, not FAIL, so the harness stays green during transient Gemini
-  outages. Production smoke 9/9 OK as of latest deploy.
+- **Smoke harness v2** — `scripts/smoke-production-v2.mjs` hits the 10
+  active public endpoints with realistic payloads, asserts shape +
+  latency budgets, and prints a final table. It also probes
+  `/api/extras-lookup`, which is currently disabled (moved to
+  api-disabled/ to stay under the Vercel function-count limit) and is
+  expected to WARN as disabled — 11 probes total. Degraded mode is
+  likewise reported as WARN, not FAIL, so the harness stays green
+  during transient Gemini outages. Production smoke 10/10 active
+  endpoints OK as of latest deploy (extras-lookup expected-disabled WARN).
 - **Telemetry plumbing** — `src/lib/telemetry.js` `trackEvent()` (uses
   `navigator.sendBeacon` when available) and `api/telemetry-beacon.js` sink
   are live; per-surface wiring lands in Round 3.
@@ -158,7 +162,8 @@ node scripts/smoke-production-v2.mjs --verbose
 
 Exit codes:
 
-- `0` — no FAIL across the 9 endpoints (WARN allowed for degraded mode).
+- `0` — no FAIL across the 10 active endpoints (WARN allowed for
+  degraded mode and for the expected-disabled `/api/extras-lookup` probe).
 - `1` — at least one FAIL (shape break, latency budget exceeded, 5xx).
 
 The legacy `scripts/smoke-production.mjs` is still wired for the

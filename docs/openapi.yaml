@@ -526,7 +526,12 @@ paths:
     post:
       tags: [extras]
       summary: Single-DOI paper_extras_v2 subset lookup
+      deprecated: true
       description: |
+        RETIRED — moved to api-disabled/ to stay under the Vercel
+        function-count limit; currently returns 404. Will return when on
+        a higher plan. The schema below is retained for that restoration.
+
         Resolves a single DOI against a bundled JSON subset of
         recently-computed `paper_extras_v2` rows
         (`weights/paper_extras_v2_subset.json`). When the subset file
@@ -576,6 +581,11 @@ paths:
     options:
       tags: [extras]
       summary: CORS preflight
+      deprecated: true
+      description: |
+        RETIRED — moved to api-disabled/ to stay under the Vercel
+        function-count limit; currently returns 404. Will return when on
+        a higher plan.
       operationId: optionsExtrasLookup
       responses:
         '204':
