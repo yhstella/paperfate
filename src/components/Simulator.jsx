@@ -220,6 +220,7 @@ export default function Simulator() {
   const [text, setText] = useState('')
   const [overrides, setOverrides] = useState({})
   const [status, setStatus] = useState('idle')
+  const [errorMsg, setErrorMsg] = useState(null)
   const [result, setResult] = useState(null)
 
   const [targetJournalInput, setTargetJournalInput] = useState('')
@@ -629,6 +630,7 @@ export default function Simulator() {
       if (pendingConfirm) setPendingConfirm(null)
     }
     setStatus('running')
+    setErrorMsg(null)
     setResult(null)
     const studyType = get('studyType', 'Other')
     let articleType = STUDY_TYPE_TO_ARTICLE_TYPE[studyType] || '*'
@@ -785,6 +787,20 @@ export default function Simulator() {
     } catch (err) {
       console.error('forecast failed:', err)
       setStatus('idle')
+      // Honest, status-specific message — never a fabricated forecast.
+      if (err?.name !== 'AbortError') {
+        const code = err?.status
+        let key = 'errors.unknown'
+        if (code === 429) key = 'errors.rate_limited'
+        else if (code === 413) key = 'errors.payload_too_large'
+        else if (code === 408 || /timeout/i.test(err?.message || '')) key = 'errors.request_timeout'
+        else if (!code) key = 'errors.network'        // transport failure (no HTTP response)
+        let msg = t(key)
+        if (code === 429 && err?.retryAfter) {
+          msg = `${t('errors.rate_limited')} (${err.retryAfter}s)`
+        }
+        setErrorMsg(msg)
+      }
       trackEvent('sim_forecast_result_error', {
         http_or_code: (err && (err.code || err.status || err.message?.slice(0, 80))) || 'unknown',
       })
@@ -1104,6 +1120,9 @@ export default function Simulator() {
                 </button>
               </div>
             </div>
+            {errorMsg && status !== 'running' && (
+              <p role="alert" className="mt-3 text-sm text-rose-300">{errorMsg}</p>
+            )}
             {inputMode === 'abstract' && (quickStatus !== 'idle') && (
               <QuickRubricPreview
                 status={quickStatus}

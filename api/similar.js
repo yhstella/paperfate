@@ -188,7 +188,8 @@ export default async function handler(req, res) {
     searchOpenAlexTitle(title, mailto, 6, deadline),
   ])
   if (raw?._error && !titleHit) {
-    return bad(res, 502, 'openalex_search_failed', raw._error)
+    console.error('[similar] openalex search failed:', raw._error)
+    return bad(res, 502, 'openalex_unavailable')
   }
 
   const ownTitleNorm = normalizeTitle(title)

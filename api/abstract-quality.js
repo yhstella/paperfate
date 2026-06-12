@@ -296,7 +296,7 @@ export default async function handler(req, res) {
   }
 
   let body
-  try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', String(e.message || e), request_id) }
+  try { body = await readBody(req) } catch (e) { return bad(res, 400, 'invalid_json', 'request body is not valid JSON', request_id) }
 
   // Structural schema validation (additive — runs BEFORE legacy required checks).
   const _v = validateAbstractQualityBody(body)
@@ -339,6 +339,7 @@ export default async function handler(req, res) {
       request_id,
     })
   } catch (e) {
-    return bad(res, 500, 'extraction_failed', String(e.message || e))
+    console.error('[abstract-quality]', request_id, e)
+    return bad(res, 500, 'extraction_failed', undefined, request_id)
   }
 }

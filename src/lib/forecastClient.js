@@ -199,13 +199,30 @@ export async function forecast(input, opts = {}) {
       signal,
     })
     if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      throw new Error(`/api/forecast HTTP ${res.status}: ${detail.slice(0, 200)}`)
+      // A real HTTP response (403 origin-blocked, 429 rate-limited, 4xx/5xx).
+      // NEVER mask these with a fabricated mock forecast — the user must see
+      // an honest message. Surface the status (+ Retry-After for 429) so the
+      // UI can render the right copy instead of a confident fake result.
+      let serverBody = null
+      try { serverBody = await res.json() } catch {}
+      const e = new Error(`/api/forecast HTTP ${res.status}`)
+      e.isHttp = true
+      e.status = res.status
+      e.serverError = serverBody?.error || null
+      e.retryAfter = Number(res.headers.get('retry-after')) || null
+      throw e
     }
     return await res.json()
   } catch (err) {
+    // HTTP errors propagate (handled above) — do not fall back to mock.
+    if (err?.isHttp) throw err
+    // Aborted requests are user-initiated cancels, not failures.
+    if (err?.name === 'AbortError') throw err
+    // Only a genuine transport failure (server unreachable / offline) falls
+    // back to the local heuristic — and it's flagged degraded so the UI shows
+    // an unmistakable "offline estimate" banner, never a silent fake.
     if (fallbackMock) {
-      console.warn('forecast: falling back to mock engine —', err.message)
+      console.warn('forecast: server unreachable, offline estimate —', err.message)
       const wrapped = adaptMockToServer(mockSimulate({
         title: input.title,
         abstract: input.abstract,
@@ -217,7 +234,8 @@ export async function forecast(input, opts = {}) {
         multicenter: input.multicenter || false,
         endpoints: input.endpoints || [],
       }), input)
-      wrapped.mock_fallback_reason = err.message
+      wrapped.mock_fallback_reason = 'server_unreachable'
+      wrapped.degraded = true
       return wrapped
     }
     throw err
